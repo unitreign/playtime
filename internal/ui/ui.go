@@ -92,9 +92,17 @@ func Run(store *db.Store, romsRoot string, fontData []byte) error {
 	}
 	defer rend.Destroy()
 
+	// Open all connected game controllers so ControllerButtonEvents are generated.
+	for i := 0; i < sdl.NumJoysticks(); i++ {
+		if sdl.IsGameController(i) {
+			sdl.GameControllerOpen(i)
+		}
+	}
+
 	w, h := win.GetSize()
 
-	baseFontSize := int(float32(h) * 0.033) // ~16px at 480p
+	// Minimum 14px so the UI is readable on small screens like the RG34XX (272p).
+	baseFontSize := max(14, int(float32(h)*0.033))
 	font, err := openFont(baseFontSize)
 	if err != nil {
 		return fmt.Errorf("open font: %w", err)
@@ -195,6 +203,9 @@ func (s *state) loop() error {
 					return nil
 				}
 
+			case *sdl.ControllerDeviceAddedEvent:
+				sdl.GameControllerOpen(int(e.Which))
+
 			case *sdl.ControllerButtonEvent:
 				if e.Type != sdl.CONTROLLERBUTTONDOWN {
 					continue
@@ -208,7 +219,9 @@ func (s *state) loop() error {
 					s.prevScreen()
 				case sdl.CONTROLLER_BUTTON_RIGHTSHOULDER:
 					s.nextScreen()
-				case sdl.CONTROLLER_BUTTON_B, sdl.CONTROLLER_BUTTON_START:
+				// B=east, A=south — Anbernic physical "B" (cancel) may report as either
+				// depending on driver mapping, so accept both. Start also exits.
+				case sdl.CONTROLLER_BUTTON_B, sdl.CONTROLLER_BUTTON_A, sdl.CONTROLLER_BUTTON_START:
 					return nil
 				}
 			}
@@ -227,11 +240,14 @@ func (s *state) loop() error {
 func (s *state) render() {
 	scr := s.screens[s.screenIdx]
 
-	headerH := s.h / 17 // ~28px at 480p
-	footerH := s.h / 24 // ~20px at 480p
+	// Adaptive header/footer — at least 28/20px so text isn't cramped on 272p screens.
+	headerH := max(s.h/10, int32(28))
+	footerH := max(s.h/16, int32(20))
 	rowsH := s.h - headerH - footerH
 
-	rowH := int32(rowsH) / int32(clamp(int(rowsH)/minRowH, 1, maxRows))
+	// Adaptive row height: s.h/6 gives ~45px on 272p (5 rows) and ~80px on 480p (5 rows).
+	adaptiveMinRowH := max(s.h/6, int32(40))
+	rowH := int32(rowsH) / int32(clamp(int(rowsH)/int(adaptiveMinRowH), 1, maxRows))
 	visible := int(rowsH) / int(rowH)
 
 	s.renderHeader(scr, headerH)
@@ -267,6 +283,18 @@ func (s *state) renderHeader(scr Screen, h int32) {
 
 func (s *state) renderRows(scr Screen, offsetY, rowH int32, visible int) {
 	games := scr.Games
+
+	if len(games) == 0 {
+		midY := offsetY + (s.h-offsetY)/2
+		msg := "No play sessions recorded yet."
+		sub := "Play a game — it will appear here after the session ends."
+		mw, _, _ := s.font.SizeUTF8(msg)
+		sw, _, _ := s.sm.SizeUTF8(sub)
+		s.drawText(s.font, msg, s.w/2-int32(mw)/2, midY-int32(s.font.Height()), false, sdl.Color{R: 60, G: 65, B: 95, A: 255})
+		s.drawText(s.sm, sub, s.w/2-int32(sw)/2, midY+4, false, sdl.Color{R: 37, G: 40, B: 64, A: 255})
+		return
+	}
+
 	end := s.scroll + visible
 	if end > len(games) {
 		end = len(games)
@@ -336,9 +364,14 @@ func (s *state) renderFooter(scr Screen, h int32, visible int) {
 
 	pad := int32(s.w) / 64
 
-	s.drawText(s.sm, "B  exit", pad, y+h/2, false, sdl.Color{R: 32, G: 36, B: 56, A: 255})
+	s.drawText(s.sm, "B / START  exit", pad, y+h/2, false, sdl.Color{R: 32, G: 36, B: 56, A: 255})
 
-	pos := fmt.Sprintf("%d / %d", s.scroll+1, len(scr.Games))
+	var pos string
+	if len(scr.Games) == 0 {
+		pos = "0 games"
+	} else {
+		pos = fmt.Sprintf("%d / %d", s.scroll+1, len(scr.Games))
+	}
 	pw, _, _ := s.sm.SizeUTF8(pos)
 	s.drawText(s.sm, pos, s.w-pad-int32(pw), y+h/2, false, sdl.Color{R: 32, G: 36, B: 56, A: 255})
 }
