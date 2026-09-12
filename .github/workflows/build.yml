@@ -17,10 +17,23 @@ jobs:
 
       - name: Install ARM64 cross-compiler and SDL2 libs
         run: |
+          # Get the current Ubuntu codename (noble on ubuntu-latest)
+          CODENAME=$(lsb_release -cs)
+
           sudo dpkg --add-architecture arm64
-          sudo sed -i 's/^deb /deb [arch=amd64] /' /etc/apt/sources.list
-          echo "deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports jammy main restricted universe" | sudo tee -a /etc/apt/sources.list
-          echo "deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports jammy-updates main restricted universe" | sudo tee -a /etc/apt/sources.list
+
+          # Restrict existing sources to amd64 only
+          sudo sed -i 's/^Types: deb$/Types: deb/' /etc/apt/sources.list.d/ubuntu.sources 2>/dev/null || true
+          sudo sed -i 's/^deb /deb [arch=amd64] /' /etc/apt/sources.list 2>/dev/null || true
+
+          # Add arm64 sources from ports.ubuntu.com
+          cat <<EOF | sudo tee /etc/apt/sources.list.d/arm64-ports.list
+          deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports ${CODENAME} main restricted universe multiverse
+          deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports ${CODENAME}-updates main restricted universe multiverse
+          deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports ${CODENAME}-security main restricted universe multiverse
+          deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports ${CODENAME}-backports main restricted universe multiverse
+          EOF
+
           sudo apt-get update -qq
           sudo apt-get install -y \
             gcc-aarch64-linux-gnu \
@@ -34,7 +47,6 @@ jobs:
           GOARCH: arm64
           CGO_ENABLED: "1"
           CC: aarch64-linux-gnu-gcc
-          CGO_CFLAGS: "-I/usr/include/SDL2"
           CGO_LDFLAGS: "-L/usr/lib/aarch64-linux-gnu"
         run: go build -ldflags="-s -w" -o playtime .
 
