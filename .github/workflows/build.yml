@@ -46,22 +46,24 @@ jobs:
 
           sudo apt-get update -qq
 
-          # Cross-compiler + amd64 SDL2 headers (headers are arch-neutral C, fine for cross-compile)
+          # Cross-compiler and arm64 runtime .so files
           sudo apt-get install -y \
             gcc-aarch64-linux-gnu \
-            libsdl2-dev \
-            libsdl2-ttf-dev \
-            libsdl2-image-dev
-
-          # ARM64 runtime .so files only — avoids the libglib2.0-dev:arm64 conflict
-          sudo apt-get install -y \
             libsdl2-2.0-0:arm64 \
             libsdl2-ttf-2.0-0:arm64 \
             libsdl2-image-2.0-0:arm64
 
-          # Create linker symlinks (normally provided by -dev packages)
-          sudo ln -sf libSDL2-2.0.so.0     /usr/lib/aarch64-linux-gnu/libSDL2.so
-          sudo ln -sf libSDL2_ttf-2.0.so.0 /usr/lib/aarch64-linux-gnu/libSDL2_ttf.so
+          # Download arm64 SDL2 dev .debs WITHOUT installing (avoids libglib2.0-dev conflict)
+          # then extract just the headers we need for the cross-compiler
+          mkdir -p /tmp/sdl2-arm64
+          cd /tmp/sdl2-arm64
+          apt-get download libsdl2-dev:arm64 libsdl2-ttf-dev:arm64 libsdl2-image-dev:arm64
+          for deb in *.deb; do dpkg-deb -x "$deb" sysroot; done
+          cd -
+
+          # Create linker symlinks (normally provided by -dev packages we didn't install)
+          sudo ln -sf libSDL2-2.0.so.0       /usr/lib/aarch64-linux-gnu/libSDL2.so
+          sudo ln -sf libSDL2_ttf-2.0.so.0   /usr/lib/aarch64-linux-gnu/libSDL2_ttf.so
           sudo ln -sf libSDL2_image-2.0.so.0 /usr/lib/aarch64-linux-gnu/libSDL2_image.so
 
       - name: Download dependencies
@@ -73,6 +75,7 @@ jobs:
           GOARCH: arm64
           CGO_ENABLED: "1"
           CC: aarch64-linux-gnu-gcc
+          CGO_CFLAGS: "-I/tmp/sdl2-arm64/sysroot/usr/include -I/tmp/sdl2-arm64/sysroot/usr/include/aarch64-linux-gnu"
           CGO_LDFLAGS: "-L/usr/lib/aarch64-linux-gnu"
         run: go build -ldflags="-s -w" -o playtime .
 
