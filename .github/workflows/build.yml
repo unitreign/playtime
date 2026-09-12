@@ -22,13 +22,11 @@ jobs:
 
           sudo dpkg --add-architecture arm64
 
-          # Lock existing sources to amd64 and add arm64 ports — all in Python to avoid
-          # heredoc indentation issues in YAML
+          # Lock existing sources to amd64, add arm64 ports — Python handles DEB822 format
           sudo python3 - "$CODENAME" <<'PY'
           import re, pathlib, sys
           codename = sys.argv[1]
 
-          # Ubuntu 24.04 uses DEB822 .sources format — add Architectures: amd64 per stanza
           p = pathlib.Path("/etc/apt/sources.list.d/ubuntu.sources")
           if p.exists():
               txt = p.read_text()
@@ -36,14 +34,12 @@ jobs:
                            r'\1\nArchitectures: amd64\n', txt)
               p.write_text(txt)
 
-          # Legacy .list format (older Ubuntu or extra custom sources)
           lp = pathlib.Path("/etc/apt/sources.list")
           if lp.exists():
               txt = lp.read_text()
               txt = re.sub(r'^deb (?!\[)', 'deb [arch=amd64] ', txt, flags=re.MULTILINE)
               lp.write_text(txt)
 
-          # ARM64 ports — written with no leading spaces (plain write avoids heredoc issues)
           pathlib.Path("/etc/apt/sources.list.d/arm64-ports.list").write_text(
               f"deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports {codename} main restricted universe multiverse\n"
               f"deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports {codename}-updates main restricted universe multiverse\n"
@@ -53,36 +49,43 @@ jobs:
 
           sudo apt-get update -qq
 
-          # Cross-compiler + arm64 runtime .so files
-          # No -dev packages: libsdl2-dev:arm64 pulls libglib2.0-dev:arm64 which conflicts
+          # Cross-compiler + arm64 runtime .so files + arch-independent header packages.
+          # x11proto-dev and xtrans-dev are Architecture:all — NO :arm64 suffix.
+          # libsdl2-dev:arm64 is intentionally NOT installed here to avoid the
+          # libglib2.0-dev:arm64 conflict; dev headers are extracted below instead.
           sudo apt-get install -y \
             gcc-aarch64-linux-gnu \
+            x11proto-dev \
+            xtrans-dev \
             libsdl2-2.0-0:arm64 \
             libsdl2-ttf-2.0-0:arm64 \
             libsdl2-image-2.0-0:arm64
 
-          # Download arm64 dev headers without installing (no conflicts this way).
-          # SDL2's public headers (SDL_syswm.h) pull in X11, KMS/DRM, and Wayland headers
-          # depending on compile-time flags. Download all of them to avoid repeated failures.
+          # Download arm64 dev .debs without installing (download avoids all conflicts).
+          # Also download arch-independent packages (no :arm64) to seed the sysroot so
+          # the cross-compiler finds X11/X.h and friends alongside the arm64 headers.
           mkdir -p /tmp/sdl2/sysroot
           cd /tmp/sdl2
           apt-get download \
             libsdl2-dev:arm64 libsdl2-ttf-dev:arm64 libsdl2-image-dev:arm64 \
             libx11-dev:arm64 libxcb1-dev:arm64 libxau-dev:arm64 libxdmcp-dev:arm64 \
-            libxext-dev:arm64 libxrender-dev:arm64 libxfixes-dev:arm64 \
+            libpthread-stubs0-dev:arm64 \
+            libxext-dev:arm64 libxfixes-dev:arm64 libxrender-dev:arm64 \
             libxrandr-dev:arm64 libxinerama-dev:arm64 libxi-dev:arm64 libxcursor-dev:arm64 \
-            libdrm-dev:arm64 libwayland-dev:arm64 libgbm-dev:arm64
+            libdrm-dev:arm64 libgbm-dev:arm64 libegl-dev:arm64 \
+            libwayland-dev:arm64 libxkbcommon-dev:arm64 libdecor-0-dev:arm64
+          apt-get download x11proto-dev xtrans-dev
           for deb in *.deb; do dpkg-deb -x "$deb" sysroot; done
 
-          # Linker symlinks: the .so (not .so.0) is needed at link time
+          # Linker symlinks: -lSDL2 etc. need unversioned .so at link time
           sudo ln -sf libSDL2-2.0.so.0       /usr/lib/aarch64-linux-gnu/libSDL2.so
           sudo ln -sf libSDL2_ttf-2.0.so.0   /usr/lib/aarch64-linux-gnu/libSDL2_ttf.so
           sudo ln -sf libSDL2_image-2.0.so.0 /usr/lib/aarch64-linux-gnu/libSDL2_image.so
 
-          # Write pkg-config .pc files.
-          # go-sdl2 uses: #cgo pkg-config: sdl2 / SDL2_ttf / SDL2_image
-          # Without these, Go errors immediately with "Package sdl2 was not found" —
-          # CGO_CFLAGS never even gets used.
+          # Write pkg-config files.
+          # go-sdl2 dynamic build calls: pkg-config sdl2 (sdl + img packages)
+          #                               pkg-config SDL2_ttf (ttf package)
+          # img uses pkg-config:sdl2 + hardcoded -lSDL2_image LDFLAGS, so no SDL2_image.pc needed.
           python3 - <<'PY2'
           import pathlib
           inc = "/tmp/sdl2/sysroot/usr/include"
@@ -90,8 +93,6 @@ jobs:
           d = pathlib.Path("/tmp/sdl2-pc")
           d.mkdir(exist_ok=True)
 
-          # sdl2.pc — two Cflags include paths: SDL2/ for main headers,
-          # aarch64-linux-gnu/SDL2/ for _real_SDL_config.h (arch-specific config)
           (d / "sdl2.pc").write_text(
               "Name: SDL2\n"
               "Description: Simple DirectMedia Layer\n"
@@ -108,14 +109,6 @@ jobs:
               f"Cflags: -I{inc}/SDL2\n"
               f"Libs: -L{lib} -lSDL2_ttf\n"
           )
-          (d / "SDL2_image.pc").write_text(
-              "Name: SDL2_image\n"
-              "Description: Image loading for SDL2\n"
-              "Version: 2.0.0\n"
-              "Requires: sdl2\n"
-              f"Cflags: -I{inc}/SDL2\n"
-              f"Libs: -L{lib} -lSDL2_image\n"
-          )
           PY2
 
       - name: Download dependencies
@@ -128,7 +121,13 @@ jobs:
           CGO_ENABLED: "1"
           CC: aarch64-linux-gnu-gcc
           PKG_CONFIG_PATH: /tmp/sdl2-pc
-          CGO_CFLAGS: "-I/tmp/sdl2/sysroot/usr/include -I/tmp/sdl2/sysroot/usr/include/aarch64-linux-gnu"
+          PKG_CONFIG_ALLOW_CROSS: "1"
+          # Include both the generic SDL2 header path and the arch-specific path
+          # (aarch64-linux-gnu/SDL2/) which contains _real_SDL_config.h and other
+          # arch-specific headers. The sysroot also has X11/, wayland/, drm/ etc.
+          CGO_CFLAGS: >-
+            -I/tmp/sdl2/sysroot/usr/include
+            -I/tmp/sdl2/sysroot/usr/include/aarch64-linux-gnu
           CGO_LDFLAGS: "-L/usr/lib/aarch64-linux-gnu"
         run: go build -ldflags="-s -w" -o playtime .
 
