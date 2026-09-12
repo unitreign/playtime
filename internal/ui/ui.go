@@ -65,7 +65,7 @@ func Run(store *db.Store, romsRoot string, fontData []byte) error {
 	}
 	defer ttf.Quit()
 
-	if err := img.Init(img.INIT_PNG | img.INIT_JPG); err != 0 {
+	if err := img.Init(img.INIT_PNG | img.INIT_JPG); err != nil {
 		return fmt.Errorf("img init: %w", err)
 	}
 	defer img.Quit()

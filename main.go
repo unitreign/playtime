@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
-
 	"github.com/unitreign/playtime/internal/db"
 	"github.com/unitreign/playtime/internal/ui"
 )
@@ -202,24 +200,9 @@ func updateGamelist(appDir string) {
 
 // --- paths ---
 
-func cfw() string {
-	return strings.ToUpper(os.Getenv("CFW"))
-}
-
-func dataDir() string {
-	_ = cfw()
-	return "/userdata/system/configs/playtime"
-}
-
-func romsDir() string {
-	_ = cfw()
-	return "/userdata/roms"
-}
-
-func scriptsPath() string {
-	_ = cfw()
-	return "/userdata/system/scripts"
-}
+func dataDir() string   { return "/userdata/system/configs/playtime" }
+func romsDir() string   { return "/userdata/roms" }
+func scriptsPath() string { return "/userdata/system/scripts" }
 
 func selfDir() string {
 	exe, err := os.Executable()
