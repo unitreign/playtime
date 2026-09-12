@@ -17,14 +17,27 @@ jobs:
 
       - name: Install ARM64 cross-compiler and SDL2 libs
         run: |
-          # Get the current Ubuntu codename (noble on ubuntu-latest)
           CODENAME=$(lsb_release -cs)
 
           sudo dpkg --add-architecture arm64
 
-          # Restrict existing sources to amd64 only
-          sudo sed -i 's/^Types: deb$/Types: deb/' /etc/apt/sources.list.d/ubuntu.sources 2>/dev/null || true
-          sudo sed -i 's/^deb /deb [arch=amd64] /' /etc/apt/sources.list 2>/dev/null || true
+          # Ubuntu 24.04 uses DEB822 format — add Architectures: amd64 to every stanza
+          # so apt doesn't try to fetch arm64 from archive/security.ubuntu.com (404)
+          sudo python3 - <<'PY'
+          import re, pathlib
+          p = pathlib.Path("/etc/apt/sources.list.d/ubuntu.sources")
+          if p.exists():
+              txt = p.read_text()
+              # Insert 'Architectures: amd64' after each 'Types: deb' line if not already present
+              txt = re.sub(r'(Types: deb(?:\s+deb-src)?)\n(?!Architectures:)',
+                           r'\1\nArchitectures: amd64\n', txt)
+              p.write_text(txt)
+          # Also lock the legacy .list file if present
+          lp = pathlib.Path("/etc/apt/sources.list")
+          if lp.exists():
+              lp.write_text(re.sub(r'^deb ', 'deb [arch=amd64] ',
+                                   lp.read_text(), flags=re.MULTILINE))
+          PY
 
           # Add arm64 sources from ports.ubuntu.com
           cat <<EOF | sudo tee /etc/apt/sources.list.d/arm64-ports.list
