@@ -61,10 +61,17 @@ jobs:
             libsdl2-ttf-2.0-0:arm64 \
             libsdl2-image-2.0-0:arm64
 
-          # Download arm64 SDL2 dev .debs and extract headers without installing
+          # Download arm64 dev headers without installing (no conflicts this way).
+          # SDL2's public headers (SDL_syswm.h) pull in X11, KMS/DRM, and Wayland headers
+          # depending on compile-time flags. Download all of them to avoid repeated failures.
           mkdir -p /tmp/sdl2/sysroot
           cd /tmp/sdl2
-          apt-get download libsdl2-dev:arm64 libsdl2-ttf-dev:arm64 libsdl2-image-dev:arm64
+          apt-get download \
+            libsdl2-dev:arm64 libsdl2-ttf-dev:arm64 libsdl2-image-dev:arm64 \
+            libx11-dev:arm64 libxcb1-dev:arm64 libxau-dev:arm64 libxdmcp-dev:arm64 \
+            libxext-dev:arm64 libxrender-dev:arm64 libxfixes-dev:arm64 \
+            libxrandr-dev:arm64 libxinerama-dev:arm64 libxi-dev:arm64 libxcursor-dev:arm64 \
+            libdrm-dev:arm64 libwayland-dev:arm64 libgbm-dev:arm64
           for deb in *.deb; do dpkg-deb -x "$deb" sysroot; done
 
           # Linker symlinks: the .so (not .so.0) is needed at link time
