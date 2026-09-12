@@ -21,25 +21,22 @@ jobs:
 
           sudo dpkg --add-architecture arm64
 
-          # Ubuntu 24.04 uses DEB822 format — add Architectures: amd64 to every stanza
-          # so apt doesn't try to fetch arm64 from archive/security.ubuntu.com (404)
+          # Lock existing sources to amd64 (DEB822 format on Ubuntu 24.04)
           sudo python3 - <<'PY'
           import re, pathlib
           p = pathlib.Path("/etc/apt/sources.list.d/ubuntu.sources")
           if p.exists():
               txt = p.read_text()
-              # Insert 'Architectures: amd64' after each 'Types: deb' line if not already present
               txt = re.sub(r'(Types: deb(?:\s+deb-src)?)\n(?!Architectures:)',
                            r'\1\nArchitectures: amd64\n', txt)
               p.write_text(txt)
-          # Also lock the legacy .list file if present
           lp = pathlib.Path("/etc/apt/sources.list")
           if lp.exists():
               lp.write_text(re.sub(r'^deb ', 'deb [arch=amd64] ',
                                    lp.read_text(), flags=re.MULTILINE))
           PY
 
-          # Add arm64 sources from ports.ubuntu.com
+          # ARM64 packages only from ports.ubuntu.com
           cat <<EOF | sudo tee /etc/apt/sources.list.d/arm64-ports.list
           deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports ${CODENAME} main restricted universe multiverse
           deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports ${CODENAME}-updates main restricted universe multiverse
@@ -48,11 +45,24 @@ jobs:
           EOF
 
           sudo apt-get update -qq
+
+          # Cross-compiler + amd64 SDL2 headers (headers are arch-neutral C, fine for cross-compile)
           sudo apt-get install -y \
             gcc-aarch64-linux-gnu \
-            libsdl2-dev:arm64 \
-            libsdl2-ttf-dev:arm64 \
-            libsdl2-image-dev:arm64
+            libsdl2-dev \
+            libsdl2-ttf-dev \
+            libsdl2-image-dev
+
+          # ARM64 runtime .so files only — avoids the libglib2.0-dev:arm64 conflict
+          sudo apt-get install -y \
+            libsdl2-2.0-0:arm64 \
+            libsdl2-ttf-2.0-0:arm64 \
+            libsdl2-image-2.0-0:arm64
+
+          # Create linker symlinks (normally provided by -dev packages)
+          sudo ln -sf libSDL2-2.0.so.0     /usr/lib/aarch64-linux-gnu/libSDL2.so
+          sudo ln -sf libSDL2_ttf-2.0.so.0 /usr/lib/aarch64-linux-gnu/libSDL2_ttf.so
+          sudo ln -sf libSDL2_image-2.0.so.0 /usr/lib/aarch64-linux-gnu/libSDL2_image.so
 
       - name: Build
         env:
