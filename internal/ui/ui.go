@@ -203,8 +203,10 @@ func (s *state) loop() error {
 					return nil
 				}
 
-			case *sdl.ControllerDeviceAddedEvent:
-				sdl.GameControllerOpen(int(e.Which))
+			case *sdl.ControllerDeviceEvent:
+				if e.Type == sdl.CONTROLLERDEVICEADDED {
+					sdl.GameControllerOpen(int(e.Which))
+				}
 
 			case *sdl.ControllerButtonEvent:
 				if e.Type != sdl.CONTROLLERBUTTONDOWN {
