@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"unsafe"
 
 	"github.com/unitreign/playtime/internal/db"
 	"github.com/unitreign/playtime/internal/gamelist"
@@ -71,8 +70,8 @@ func Run(store *db.Store, romsRoot string, fontData []byte) error {
 	defer img.Quit()
 
 	// Detect real display resolution
-	var dm sdl.DisplayMode
-	if err := sdl.GetDesktopDisplayMode(0, &dm); err != nil {
+	dm, err := sdl.GetDesktopDisplayMode(0)
+	if err != nil {
 		dm.W, dm.H = 640, 480
 	}
 
@@ -262,7 +261,7 @@ func (s *state) renderHeader(scr Screen, h int32) {
 
 	// Total time — right
 	timeStr := formatDuration(scr.TotalSecs)
-	tw, _ := s.sm.SizeUTF8(timeStr)
+	tw, _, _ := s.sm.SizeUTF8(timeStr)
 	s.drawText(s.sm, timeStr, s.w-pad-int32(tw), h/2, false, sdl.Color{R: 184, G: 148, B: 60, A: 255})
 }
 
@@ -319,8 +318,8 @@ func (s *state) renderRow(g db.GameStats, rank int, y, rowH int32) {
 	timeStr := formatDuration(g.TotalSecs)
 	playsStr := fmt.Sprintf("%d plays", g.Plays)
 
-	tw, _ := s.font.SizeUTF8(timeStr)
-	pw, _ := s.sm.SizeUTF8(playsStr)
+	tw, _, _ := s.font.SizeUTF8(timeStr)
+	pw, _, _ := s.sm.SizeUTF8(playsStr)
 	rightEdge := s.w - pad
 
 	timeY := y + rowH/2 - int32(s.font.Height())/2 - 1
@@ -340,7 +339,7 @@ func (s *state) renderFooter(scr Screen, h int32, visible int) {
 	s.drawText(s.sm, "B  exit", pad, y+h/2, false, sdl.Color{R: 32, G: 36, B: 56, A: 255})
 
 	pos := fmt.Sprintf("%d / %d", s.scroll+1, len(scr.Games))
-	pw, _ := s.sm.SizeUTF8(pos)
+	pw, _, _ := s.sm.SizeUTF8(pos)
 	s.drawText(s.sm, pos, s.w-pad-int32(pw), y+h/2, false, sdl.Color{R: 32, G: 36, B: 56, A: 255})
 }
 
@@ -411,7 +410,7 @@ func formatDuration(secs int) string {
 // openFont loads the embedded font first; falls back to filesystem candidates.
 func openFont(size int) (*ttf.Font, error) {
 	if len(embeddedFont) > 0 {
-		rw, err := sdl.RWFromMem(unsafe.Pointer(&embeddedFont[0]), len(embeddedFont))
+		rw, err := sdl.RWFromMem(embeddedFont)
 		if err == nil {
 			f, err := ttf.OpenFontRW(rw, 1, size)
 			if err == nil {
