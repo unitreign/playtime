@@ -1,6 +1,7 @@
 package main
 
 import (
+	_ "embed"
 	"encoding/xml"
 	"fmt"
 	"os"
@@ -10,6 +11,9 @@ import (
 	"github.com/unitreign/playtime/internal/db"
 	"github.com/unitreign/playtime/internal/ui"
 )
+
+//go:embed font.ttf
+var fontData []byte
 
 const (
 	appName  = "playtime"
@@ -45,7 +49,7 @@ func runUI() {
 	defer store.Close()
 
 	romsRoot := romsDir()
-	if err := ui.Run(store, romsRoot); err != nil {
+	if err := ui.Run(store, romsRoot, fontData); err != nil {
 		die("ui: %v", err)
 	}
 }

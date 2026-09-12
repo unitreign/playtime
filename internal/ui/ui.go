@@ -1,7 +1,6 @@
 package ui
 
 import (
-	_ "embed"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -14,7 +13,7 @@ import (
 	"github.com/veandco/go-sdl2/ttf"
 )
 
-//go:embed ../../font.ttf
+// embeddedFont is set by main via Run's fontData parameter.
 var embeddedFont []byte
 
 const (
@@ -54,7 +53,8 @@ type state struct {
 	w, h int32
 }
 
-func Run(store *db.Store, romsRoot string) error {
+func Run(store *db.Store, romsRoot string, fontData []byte) error {
+	embeddedFont = fontData
 	if err := sdl.Init(sdl.INIT_VIDEO | sdl.INIT_GAMECONTROLLER); err != nil {
 		return fmt.Errorf("sdl init: %w", err)
 	}

@@ -64,6 +64,9 @@ jobs:
           sudo ln -sf libSDL2_ttf-2.0.so.0 /usr/lib/aarch64-linux-gnu/libSDL2_ttf.so
           sudo ln -sf libSDL2_image-2.0.so.0 /usr/lib/aarch64-linux-gnu/libSDL2_image.so
 
+      - name: Download dependencies
+        run: go mod download
+
       - name: Build
         env:
           GOOS: linux
