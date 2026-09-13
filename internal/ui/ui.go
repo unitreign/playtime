@@ -117,7 +117,8 @@ func Run(romsRoot string, fontData []byte) error {
 	}
 	defer font.Close()
 
-	sm, err := openFont(max(14, int(float32(baseFontSize)*0.8)))
+	smSize := max(14, int(float32(baseFontSize)*0.8))
+	sm, err := openFont(smSize)
 	if err != nil {
 		return fmt.Errorf("open small font: %w", err)
 	}
@@ -647,9 +648,3 @@ func clamp(v, lo, hi int) int {
 	return v
 }
 
-func max(a, b int32) int32 {
-	if a > b {
-		return a
-	}
-	return b
-}
