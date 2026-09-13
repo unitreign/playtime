@@ -309,13 +309,13 @@ func (s *state) renderHeader(h int32) {
 	pad := s.w / 64
 	scr := s.screens[s.screenIdx]
 
-	// Left: total play time for current screen
-	timeStr := formatDuration(scr.TotalSecs)
-	s.drawText(s.sm, timeStr, pad, h/2, true, colDim)
+	// Left: app name
+	s.drawText(s.sm, "PlayTime", pad, h/2, true, colAccent)
 
-	// Right: current screen label
-	lw, _, _ := s.sm.SizeUTF8(scr.Label)
-	s.drawText(s.sm, scr.Label, s.w-pad-int32(lw), h/2, true, colAccent)
+	// Right: "2h 34m · All Games"
+	right := formatDuration(scr.TotalSecs) + "  ·  " + scr.Label
+	rw, _, _ := s.sm.SizeUTF8(right)
+	s.drawText(s.sm, right, s.w-pad-int32(rw), h/2, true, colDim)
 }
 
 func (s *state) renderRows(offsetY, rowH int32, visible int) {
