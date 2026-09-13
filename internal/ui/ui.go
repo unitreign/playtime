@@ -133,28 +133,21 @@ func (s *state) loadData(store *db.Store, romsRoot string) error {
 	if err != nil {
 		return err
 	}
-	totalSecs, _ := store.TotalSecs(minDuration)
 
 	systems, err := store.Systems(minDuration)
 	if err != nil {
 		return err
 	}
 
-	// Load gamelists for scraped titles and cover art
 	gamelists, _ := gamelist.LoadAll(romsRoot)
 
-	// Override stored romName with scraped title from gamelist.xml when available
+	// Override stored romName with scraped title and preload covers for every game.
 	for i, g := range allGames {
-		if entry, ok := gamelists[g.RomPath]; ok && entry.Name != "" {
-			allGames[i].RomName = entry.Name
-		}
-	}
-
-	// Pre-load cover textures for all games
-	for _, g := range allGames {
-		if gl, ok := gamelists[g.RomPath]; ok {
-			coverPath := gl.CoverPath(filepath.Dir(g.RomPath))
-			if coverPath != "" {
+		if entry, ok := gamelists[g.RomPath]; ok {
+			if entry.Name != "" {
+				allGames[i].RomName = entry.Name
+			}
+			if coverPath := entry.CoverPath(filepath.Dir(g.RomPath)); coverPath != "" {
 				if tex, err := img.LoadTexture(s.rend, coverPath); err == nil {
 					s.covers[g.RomPath] = tex
 				}
@@ -162,25 +155,56 @@ func (s *state) loadData(store *db.Store, romsRoot string) error {
 		}
 	}
 
-	s.screens = make([]Screen, 0, 1+len(systems))
+	// Split mpv (video player) out of the games list — it gets its own screen.
+	var games, mpvGames []db.GameStats
+	gamesTotal, mpvTotal := 0, 0
+	for _, g := range allGames {
+		if g.System == "mpv" {
+			mpvGames = append(mpvGames, g)
+			mpvTotal += g.TotalSecs
+		} else {
+			games = append(games, g)
+			gamesTotal += g.TotalSecs
+		}
+	}
+
+	s.screens = make([]Screen, 0, 2+len(systems))
 	s.screens = append(s.screens, Screen{
 		Label:     "All Games",
-		Games:     allGames,
-		TotalSecs: totalSecs,
+		Games:     games,
+		TotalSecs: gamesTotal,
 	})
 
 	for _, sys := range systems {
-		games, _ := store.TopGamesBySystem(sys, minDuration)
+		if sys == "mpv" {
+			continue
+		}
+		sysGames, _ := store.TopGamesBySystem(sys, minDuration)
+		for i, g := range sysGames {
+			if entry, ok := gamelists[g.RomPath]; ok && entry.Name != "" {
+				sysGames[i].RomName = entry.Name
+			}
+		}
 		total := 0
-		for _, g := range games {
+		for _, g := range sysGames {
 			total += g.TotalSecs
 		}
 		s.screens = append(s.screens, Screen{
 			Label:     sys,
-			Games:     games,
+			Games:     sysGames,
 			TotalSecs: total,
 		})
 	}
+
+	// Videos screen — always last so L/R can reach it.
+	if len(mpvGames) > 0 {
+		s.screens = append(s.screens, Screen{
+			Label:     "Videos",
+			Games:     mpvGames,
+			TotalSecs: mpvTotal,
+		})
+	}
+
 	return nil
 }
 
@@ -277,16 +301,17 @@ func (s *state) renderHeader(scr Screen, h int32) {
 	// Title — left
 	s.drawText(s.sm, "PLAYTIME", pad, h/2, true, sdl.Color{R: 184, G: 148, B: 60, A: 255})
 
-	// Nav indicator — center
+	// Nav indicator — truly centered, uses main font so arrows are visible
 	if len(s.screens) > 1 {
 		label := fmt.Sprintf("◂  %s  ▸", scr.Label)
-		s.drawText(s.sm, label, s.w/2, h/2, true, sdl.Color{R: 46, G: 52, B: 72, A: 255})
+		lw, _, _ := s.font.SizeUTF8(label)
+		s.drawText(s.font, label, s.w/2-int32(lw)/2, h/2, true, sdl.Color{R: 100, G: 110, B: 160, A: 255})
 	}
 
-	// Total time — right
+	// Total time — right, vertically centered
 	timeStr := formatDuration(scr.TotalSecs)
 	tw, _, _ := s.sm.SizeUTF8(timeStr)
-	s.drawText(s.sm, timeStr, s.w-pad-int32(tw), h/2, false, sdl.Color{R: 184, G: 148, B: 60, A: 255})
+	s.drawText(s.sm, timeStr, s.w-pad-int32(tw), h/2, true, sdl.Color{R: 184, G: 148, B: 60, A: 255})
 }
 
 func (s *state) renderRows(scr Screen, offsetY, rowH int32, visible int) {
@@ -372,7 +397,7 @@ func (s *state) renderFooter(scr Screen, h int32, visible int) {
 
 	pad := int32(s.w) / 64
 
-	s.drawText(s.sm, "B / START  exit", pad, y+h/2, false, sdl.Color{R: 32, G: 36, B: 56, A: 255})
+	s.drawText(s.sm, "B / START  exit", pad, y+h/2, true, sdl.Color{R: 32, G: 36, B: 56, A: 255})
 
 	var pos string
 	if len(scr.Games) == 0 {
@@ -381,7 +406,7 @@ func (s *state) renderFooter(scr Screen, h int32, visible int) {
 		pos = fmt.Sprintf("%d / %d", s.scroll+1, len(scr.Games))
 	}
 	pw, _, _ := s.sm.SizeUTF8(pos)
-	s.drawText(s.sm, pos, s.w-pad-int32(pw), y+h/2, false, sdl.Color{R: 32, G: 36, B: 56, A: 255})
+	s.drawText(s.sm, pos, s.w-pad-int32(pw), y+h/2, true, sdl.Color{R: 32, G: 36, B: 56, A: 255})
 }
 
 // drawText renders a UTF-8 string. vertCenter=true centers vertically on y.
@@ -421,17 +446,19 @@ func (s *state) scrollDown() {
 }
 
 func (s *state) prevScreen() {
-	if s.screenIdx > 0 {
-		s.screenIdx--
-		s.scroll = 0
+	if len(s.screens) < 2 {
+		return
 	}
+	s.screenIdx = (s.screenIdx - 1 + len(s.screens)) % len(s.screens)
+	s.scroll = 0
 }
 
 func (s *state) nextScreen() {
-	if s.screenIdx < len(s.screens)-1 {
-		s.screenIdx++
-		s.scroll = 0
+	if len(s.screens) < 2 {
+		return
 	}
+	s.screenIdx = (s.screenIdx + 1) % len(s.screens)
+	s.scroll = 0
 }
 
 // --- helpers ---

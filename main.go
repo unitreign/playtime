@@ -103,15 +103,15 @@ func installHooks(appDir, scriptsDir string) {
 
 	bin := filepath.Join(appDir, appName)
 
-	// Knulli/Batocera ES args: $1=event $2=system $3=rom_path $4=emulator
+	// Knulli/Batocera ES args: $1=event $2=system $3=emulator $4=core $5=rom_path
 	hook := fmt.Sprintf(`#!/bin/sh
 # Managed by PlayTime — do not edit manually.
 case "$1" in
   gameStart)
-    "%s" session start "$2" "$3" &
+    "%s" session start "$2" "$5" &
     ;;
   gameStop)
-    "%s" session end "$2" "$3"
+    "%s" session end "$2" "$5"
     ;;
 esac
 `, bin, bin)
@@ -160,6 +160,8 @@ type gameXML struct {
 }
 
 // updateGamelist adds/updates the PlayTime entry in the tools gamelist.xml.
+// Skips the write if the entry is already correct — avoids triggering an ES
+// reload on every launch, which causes a first-launch crash.
 func updateGamelist(appDir string) {
 	toolsDir := filepath.Dir(appDir) // /userdata/roms/tools/
 	glPath := filepath.Join(toolsDir, "gamelist.xml")
@@ -179,17 +181,25 @@ func updateGamelist(appDir string) {
 		xml.Unmarshal(data, &gl)
 	}
 
-	// Update if entry exists, otherwise append
 	found := false
+	changed := false
 	for i, g := range gl.Games {
 		if g.Path == entry.Path {
-			gl.Games[i] = entry
+			if g != entry {
+				gl.Games[i] = entry
+				changed = true
+			}
 			found = true
 			break
 		}
 	}
 	if !found {
 		gl.Games = append(gl.Games, entry)
+		changed = true
+	}
+
+	if !changed {
+		return
 	}
 
 	out, err := xml.MarshalIndent(gl, "", "  ")
