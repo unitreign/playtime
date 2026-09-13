@@ -11,16 +11,17 @@ import (
 	"github.com/veandco/go-sdl2/ttf"
 )
 
-// embeddedFont is set by main via Run's fontData parameter.
 var embeddedFont []byte
 
 const (
-	minDuration = 10 // sessions under 10s are ignored
-	maxRows     = 8  // cap for very tall outputs (HDMI)
-	fps         = 60
+	minDuration   = 10
+	maxRows       = 8
+	fps           = 60
+	titleMaxChars = 20 // names longer than this scroll
+	tickerSpeed   = 3  // frames per pixel of scroll
+	tickerPause   = 90 // pixels of "pause" before scrolling starts
 )
 
-// fontCandidates — searched in order, first hit wins.
 var fontCandidates = []string{
 	"./font.ttf",
 	"/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
@@ -29,26 +30,39 @@ var fontCandidates = []string{
 	"/usr/share/fonts/truetype/freefont/FreeSans.ttf",
 }
 
-// Screen represents one L/R navigation view.
 type Screen struct {
-	Label     string // "All Games" | system name
+	Label     string
 	Games     []gamelist.GameStats
 	TotalSecs int
 }
 
 type state struct {
 	screens   []Screen
-	screenIdx int // current L/R position
-	scroll    int // top visible row index
+	screenIdx int
+	scroll    int
+	tab       int // 0=Games 1=Stats
 
-	covers map[string]*sdl.Texture // rom_path → loaded texture
+	tickerTick  int
+	tickerShift int
+
+	covers map[string]*sdl.Texture
 
 	win  *sdl.Window
 	rend *sdl.Renderer
 	font *ttf.Font
-	sm   *ttf.Font // small font
+	sm   *ttf.Font
 	w, h int32
 }
+
+// colors
+var (
+	colTitle    = sdl.Color{R: 225, G: 225, B: 225, A: 255}
+	colSubtitle = sdl.Color{R: 110, G: 110, B: 110, A: 255}
+	colAccent   = sdl.Color{R: 200, G: 200, B: 200, A: 255}
+	colDim      = sdl.Color{R: 75, G: 75, B: 75, A: 255}
+	colTab      = sdl.Color{R: 200, G: 200, B: 200, A: 255}
+	colTabDim   = sdl.Color{R: 60, G: 60, B: 60, A: 255}
+)
 
 func Run(romsRoot string, fontData []byte) error {
 	embeddedFont = fontData
@@ -67,7 +81,6 @@ func Run(romsRoot string, fontData []byte) error {
 	}
 	defer img.Quit()
 
-	// Detect real display resolution
 	dm, err := sdl.GetDesktopDisplayMode(0)
 	if err != nil {
 		dm.W, dm.H = 640, 480
@@ -90,7 +103,6 @@ func Run(romsRoot string, fontData []byte) error {
 	}
 	defer rend.Destroy()
 
-	// Open all connected game controllers so ControllerButtonEvents are generated.
 	for i := 0; i < sdl.NumJoysticks(); i++ {
 		if sdl.IsGameController(i) {
 			sdl.GameControllerOpen(i)
@@ -98,8 +110,6 @@ func Run(romsRoot string, fontData []byte) error {
 	}
 
 	w, h := win.GetSize()
-
-	// 0.05×h with an 18px floor — slightly larger for readability on small screens.
 	baseFontSize := max(18, int(float32(h)*0.05))
 	font, err := openFont(baseFontSize)
 	if err != nil {
@@ -133,7 +143,6 @@ func (s *state) loadData(romsRoot string) error {
 		return err
 	}
 
-	// Preload cover textures.
 	for _, g := range allGames {
 		if g.CoverPath != "" {
 			if tex, err := img.LoadTexture(s.rend, g.CoverPath); err == nil {
@@ -142,10 +151,6 @@ func (s *state) loadData(romsRoot string) error {
 		}
 	}
 
-	// Systems routed to their own side screen, excluded from All Games.
-	// Multiple system keys can share a label — they merge into one screen.
-	// Any ROM under /userdata/roms/tools/ is also forced to Tools regardless
-	// of its system name (catches ODCommander and similar tools with odd names).
 	sideScreens := map[string]string{
 		"mpv":         "Videos",
 		"sh":          "Tools",
@@ -189,7 +194,6 @@ func (s *state) loadData(romsRoot string) error {
 		TotalSecs: gamesTotal,
 	}}
 
-	// Per-system screens in stable order (derived from sorted allGames).
 	seen := map[string]bool{}
 	for _, g := range games {
 		if seen[g.System] {
@@ -208,7 +212,6 @@ func (s *state) loadData(romsRoot string) error {
 		})
 	}
 
-	// Side screens appended last in stable order.
 	for _, label := range []string{"Videos", "Tools"} {
 		if d := sidesByLabel[label]; d != nil && len(d.games) > 0 {
 			s.screens = append(s.screens, Screen{
@@ -224,7 +227,6 @@ func (s *state) loadData(romsRoot string) error {
 
 func (s *state) loop() error {
 	for {
-		// --- input ---
 		for ev := sdl.PollEvent(); ev != nil; ev = sdl.PollEvent() {
 			switch e := ev.(type) {
 			case *sdl.QuitEvent:
@@ -243,6 +245,8 @@ func (s *state) loop() error {
 					s.prevScreen()
 				case sdl.K_RIGHT:
 					s.nextScreen()
+				case sdl.K_RETURN:
+					s.switchTab()
 				case sdl.K_ESCAPE, sdl.K_b:
 					return nil
 				}
@@ -265,16 +269,22 @@ func (s *state) loop() error {
 					s.prevScreen()
 				case sdl.CONTROLLER_BUTTON_RIGHTSHOULDER:
 					s.nextScreen()
-				// B=east, A=south — Anbernic physical "B" (cancel) may report as either
-				// depending on driver mapping, so accept both. Start also exits.
+				case sdl.CONTROLLER_BUTTON_BACK:
+					s.switchTab()
 				case sdl.CONTROLLER_BUTTON_B, sdl.CONTROLLER_BUTTON_A, sdl.CONTROLLER_BUTTON_START:
 					return nil
 				}
 			}
 		}
 
-		// --- render ---
-		s.rend.SetDrawColor(10, 12, 20, 255) // #0A0C14
+		// Advance ticker
+		s.tickerTick++
+		if s.tickerTick >= tickerSpeed {
+			s.tickerTick = 0
+			s.tickerShift++
+		}
+
+		s.rend.SetDrawColor(10, 12, 20, 255)
 		s.rend.Clear()
 		s.render()
 		s.rend.Present()
@@ -284,61 +294,53 @@ func (s *state) loop() error {
 }
 
 func (s *state) render() {
-	scr := s.screens[s.screenIdx]
-
-	// Adaptive header/footer — at least 28/20px so text isn't cramped on 272p screens.
 	headerH := max(s.h/10, int32(28))
 	footerH := max(s.h/16, int32(20))
 	rowsH := s.h - headerH - footerH
-
-	// Adaptive row height: s.h/6 gives ~45px on 272p (5 rows) and ~80px on 480p (5 rows).
 	adaptiveMinRowH := max(s.h/6, int32(40))
 	rowH := int32(rowsH) / int32(clamp(int(rowsH)/int(adaptiveMinRowH), 1, maxRows))
 	visible := int(rowsH) / int(rowH)
 
-	s.renderHeader(scr, headerH)
-	s.renderRows(scr, headerH, rowH, visible)
-	s.renderFooter(scr, footerH, visible)
+	s.renderHeader(headerH)
+
+	if s.tab == 0 {
+		s.renderRows(headerH, rowH, visible)
+	} else {
+		s.renderStats(headerH, rowsH)
+	}
+
+	s.renderFooter(footerH, visible)
 }
 
-func (s *state) renderHeader(scr Screen, h int32) {
-	// Background bar
+func (s *state) renderHeader(h int32) {
 	s.rend.SetDrawColor(10, 12, 20, 255)
 	s.rend.FillRect(&sdl.Rect{X: 0, Y: 0, W: s.w, H: h})
-
-	// Separator line
 	s.rend.SetDrawColor(20, 24, 38, 255)
 	s.rend.DrawLine(0, h-1, s.w, h-1)
 
-	pad := int32(s.w) / 64
+	pad := s.w / 64
 
-	// Title — left
-	s.drawText(s.sm, "PLAYTIME", pad, h/2, true, sdl.Color{R: 160, G: 160, B: 160, A: 255})
+	// Left: app name
+	s.drawText(s.sm, "PLAYTIME", pad, h/2, true, colDim)
 
-	// Nav indicator — truly centered, ASCII arrows (safe for any embedded font)
-	if len(s.screens) > 1 {
-		label := fmt.Sprintf("< %s >", scr.Label)
-		lw, _, _ := s.font.SizeUTF8(label)
-		s.drawText(s.font, label, s.w/2-int32(lw)/2, h/2, true, sdl.Color{R: 200, G: 200, B: 200, A: 255})
-	}
-
-	// Total time — right
-	timeStr := formatDuration(scr.TotalSecs)
-	tw, _, _ := s.sm.SizeUTF8(timeStr)
-	s.drawText(s.sm, timeStr, s.w-pad-int32(tw), h/2, true, sdl.Color{R: 200, G: 200, B: 200, A: 255})
+	// Right: current screen label
+	scr := s.screens[s.screenIdx]
+	lw, _, _ := s.sm.SizeUTF8(scr.Label)
+	s.drawText(s.sm, scr.Label, s.w-pad-int32(lw), h/2, true, colAccent)
 }
 
-func (s *state) renderRows(scr Screen, offsetY, rowH int32, visible int) {
+func (s *state) renderRows(offsetY, rowH int32, visible int) {
+	scr := s.screens[s.screenIdx]
 	games := scr.Games
 
 	if len(games) == 0 {
 		midY := offsetY + (s.h-offsetY)/2
 		msg := "No play sessions recorded yet."
-		sub := "Play a game — it will appear here after the session ends."
+		sub := "Play a game — it will appear here."
 		mw, _, _ := s.font.SizeUTF8(msg)
 		sw, _, _ := s.sm.SizeUTF8(sub)
 		s.drawText(s.font, msg, s.w/2-int32(mw)/2, midY-int32(s.font.Height()), false, sdl.Color{R: 130, G: 130, B: 130, A: 255})
-		s.drawText(s.sm, sub, s.w/2-int32(sw)/2, midY+4, false, sdl.Color{R: 80, G: 80, B: 80, A: 255})
+		s.drawText(s.sm, sub, s.w/2-int32(sw)/2, midY+4, false, colDim)
 		return
 	}
 
@@ -346,41 +348,46 @@ func (s *state) renderRows(scr Screen, offsetY, rowH int32, visible int) {
 	if end > len(games) {
 		end = len(games)
 	}
-
 	for i, g := range games[s.scroll:end] {
 		y := offsetY + int32(i)*rowH
-		rank := s.scroll + i + 1
-		s.renderRow(g, rank, y, rowH)
+		s.renderRow(g, y, rowH)
 	}
 }
 
-func (s *state) renderRow(g gamelist.GameStats, rank int, y, rowH int32) {
-	pad := int32(s.w) / 64
+func (s *state) renderRow(g gamelist.GameStats, y, rowH int32) {
+	pad := s.w / 64
 
 	// Separator
 	s.rend.SetDrawColor(15, 18, 32, 255)
 	s.rend.DrawLine(0, y+rowH-1, s.w, y+rowH-1)
 
-	// Rank number
-	rankStr := fmt.Sprintf("%d", rank)
-	rankW := int32(s.w) / 22 // fixed rank column width
-	s.drawText(s.sm, rankStr, rankW-pad, y+rowH/2, true, sdl.Color{R: 70, G: 70, B: 70, A: 255})
-
-	// Cover
+	// --- Layout ---
 	coverSize := rowH - rowH/6
-	coverX := rankW + pad
+	coverX := int32(s.w/22) + pad
 	coverY := y + (rowH-coverSize)/2
-	coverRect := &sdl.Rect{X: coverX, Y: coverY, W: coverSize, H: coverSize}
 
+	nameX := coverX + coverSize + pad
+	nameAreaW := s.w / 3
+
+	// 3 stat columns, right-aligned from screen edge
+	rightEdge := s.w - pad
+	colW := (rightEdge - (nameX + nameAreaW + pad)) / 3
+	col2Right := rightEdge
+	col1Right := col2Right - colW
+	col0Right := col1Right - colW
+
+	// Vertical alignment: title row and subtitle row
+	titleY := y + rowH/2 - int32(s.font.Height())/2 - 1
+	subtitleY := titleY + int32(s.font.Height()) + 2
+
+	// --- Cover ---
 	if tex, ok := s.covers[g.RomPath]; ok {
 		_, _, imgW, imgH, _ := tex.Query()
 		dstW, dstH := coverSize, coverSize
 		if imgW > 0 && imgH > 0 {
 			if imgH >= imgW {
-				// Portrait — fit height, center horizontally
 				dstW = int32(float32(imgW) * float32(coverSize) / float32(imgH))
 			} else {
-				// Landscape — fit width, center vertically
 				dstH = int32(float32(imgH) * float32(coverSize) / float32(imgW))
 			}
 		}
@@ -388,59 +395,198 @@ func (s *state) renderRow(g gamelist.GameStats, rank int, y, rowH int32) {
 		dstY := coverY + (coverSize-dstH)/2
 		s.rend.Copy(tex, nil, &sdl.Rect{X: dstX, Y: dstY, W: dstW, H: dstH})
 	} else {
-		// Placeholder: filled rect
 		s.rend.SetDrawColor(30, 35, 55, 255)
-		s.rend.FillRect(coverRect)
+		s.rend.FillRect(&sdl.Rect{X: coverX, Y: coverY, W: coverSize, H: coverSize})
 	}
 
-	// Info column
-	infoX := coverX + coverSize + pad
-	nameY := y + rowH/2 - int32(s.font.Height())/2 - 1
-	sysY := nameY + int32(s.font.Height()) + 2
+	// --- Name (clipped, scrolls if > titleMaxChars) ---
+	fontH := int32(s.font.Height())
+	clipRect := sdl.Rect{X: nameX, Y: titleY, W: nameAreaW, H: fontH}
+	s.rend.SetClipRect(&clipRect)
 
-	name := g.RomName
-	if runes := []rune(name); len(runes) > 30 {
-		name = string(runes[:29]) + "…"
+	shift := int32(0)
+	if len([]rune(g.RomName)) > titleMaxChars {
+		textW, _, _ := s.font.SizeUTF8(g.RomName)
+		maxShift := int32(textW) - nameAreaW
+		if maxShift > 0 {
+			cycle := int(maxShift) + tickerPause
+			raw := s.tickerShift % cycle
+			if raw > tickerPause {
+				shift = int32(raw - tickerPause)
+				if shift > maxShift {
+					shift = maxShift
+				}
+			}
+		}
 	}
-	s.drawText(s.font, name, infoX, nameY, false, sdl.Color{R: 225, G: 225, B: 225, A: 255})
-	s.drawText(s.sm, fmt.Sprintf("%s · avg %s", g.System, formatDuration(g.AvgSecs)),
-		infoX, sysY, false, sdl.Color{R: 110, G: 110, B: 110, A: 255})
+	s.drawText(s.font, g.RomName, nameX-shift, titleY, false, colTitle)
+	s.rend.SetClipRect(nil)
 
-	// Stats — right aligned
-	timeStr := formatDuration(g.TotalSecs)
-	playsStr := fmt.Sprintf("%d plays", g.Plays)
+	// --- Console (subtitle) ---
+	s.drawText(s.sm, g.System, nameX, subtitleY, false, colSubtitle)
 
-	tw, _, _ := s.font.SizeUTF8(timeStr)
-	pw, _, _ := s.sm.SizeUTF8(playsStr)
-	rightEdge := s.w - pad
+	// --- Stat columns (right side) ---
+	// Column 0: Total Time
+	totalStr := formatDuration(g.TotalSecs)
+	tw, _, _ := s.font.SizeUTF8(totalStr)
+	s.drawText(s.font, totalStr, col0Right-int32(tw), titleY, false, colTitle)
+	lw, _, _ := s.sm.SizeUTF8("Total")
+	s.drawText(s.sm, "Total", col0Right-int32(lw), subtitleY, false, colSubtitle)
 
-	timeY := y + rowH/2 - int32(s.font.Height())/2 - 1
-	playsY := timeY + int32(s.font.Height()) + 2
+	// Column 1: Avg Time
+	avgStr := formatDuration(g.AvgSecs)
+	aw, _, _ := s.font.SizeUTF8(avgStr)
+	s.drawText(s.font, avgStr, col1Right-int32(aw), titleY, false, colTitle)
+	alw, _, _ := s.sm.SizeUTF8("Avg")
+	s.drawText(s.sm, "Avg", col1Right-int32(alw), subtitleY, false, colSubtitle)
 
-	s.drawText(s.font, timeStr, rightEdge-int32(tw), timeY, false, sdl.Color{R: 225, G: 225, B: 225, A: 255})
-	s.drawText(s.sm, playsStr, rightEdge-int32(pw), playsY, false, sdl.Color{R: 110, G: 110, B: 110, A: 255})
+	// Column 2: Times opened
+	opensStr := fmt.Sprintf("%d", g.Plays)
+	ow, _, _ := s.font.SizeUTF8(opensStr)
+	s.drawText(s.font, opensStr, col2Right-int32(ow), titleY, false, colTitle)
+	olw, _, _ := s.sm.SizeUTF8("Opened")
+	s.drawText(s.sm, "Opened", col2Right-int32(olw), subtitleY, false, colSubtitle)
 }
 
-func (s *state) renderFooter(scr Screen, h int32, visible int) {
+func (s *state) renderStats(offsetY, areaH int32) {
+	totalSecs, games, consoles, opens, avgSecs := s.statsData()
+
+	pad := s.w / 64
+	x := pad * 4
+
+	type stat struct {
+		value string
+		label string
+	}
+	stats := []stat{
+		{formatDuration(totalSecs), "Total Play Time"},
+		{fmt.Sprintf("%d", games), "Games Played"},
+		{fmt.Sprintf("%d", consoles), "Consoles"},
+		{fmt.Sprintf("%d", opens), "Times Opened"},
+		{formatDuration(avgSecs), "Avg Session"},
+	}
+
+	// 2-column grid
+	colW := s.w / 2
+	rowH := areaH / 3
+	for i, st := range stats {
+		col := int32(i % 2)
+		row := int32(i / 2)
+		cx := x + col*colW
+		cy := offsetY + row*rowH + rowH/4
+
+		s.drawText(s.font, st.value, cx, cy, false, colTitle)
+		s.drawText(s.sm, st.label, cx, cy+int32(s.font.Height())+4, false, colSubtitle)
+	}
+}
+
+func (s *state) statsData() (totalSecs, games, consoles, opens, avgSecs int) {
+	if len(s.screens) == 0 {
+		return
+	}
+	allGames := s.screens[0].Games
+	totalSecs = s.screens[0].TotalSecs
+	games = len(allGames)
+	for _, g := range allGames {
+		opens += g.Plays
+	}
+	if opens > 0 {
+		avgSecs = totalSecs / opens
+	}
+	skip := map[string]bool{"All Games": true, "Videos": true, "Tools": true}
+	for _, scr := range s.screens {
+		if !skip[scr.Label] {
+			consoles++
+		}
+	}
+	return
+}
+
+func (s *state) renderFooter(h int32, visible int) {
 	y := s.h - h
 	s.rend.SetDrawColor(20, 24, 38, 255)
 	s.rend.DrawLine(0, y, s.w, y)
 
-	pad := int32(s.w) / 64
+	pad := s.w / 64
 
-	s.drawText(s.sm, "B  exit    L  R  switch", pad, y+h/2, true, sdl.Color{R: 75, G: 75, B: 75, A: 255})
-
-	var pos string
-	if len(scr.Games) == 0 {
-		pos = "0 games"
+	// Tabs
+	gamesColor := colTabDim
+	statsColor := colTabDim
+	if s.tab == 0 {
+		gamesColor = colTab
 	} else {
-		pos = fmt.Sprintf("%d / %d", s.scroll+1, len(scr.Games))
+		statsColor = colTab
 	}
-	pw, _, _ := s.sm.SizeUTF8(pos)
-	s.drawText(s.sm, pos, s.w-pad-int32(pw), y+h/2, true, sdl.Color{R: 75, G: 75, B: 75, A: 255})
+
+	gw, _, _ := s.sm.SizeUTF8("Games")
+	s.drawText(s.sm, "Games", pad, y+h/2, true, gamesColor)
+	s.drawText(s.sm, "Stats", pad+int32(gw)+pad*3, y+h/2, true, statsColor)
+
+	// Right: game count (Games tab only)
+	if s.tab == 0 && len(s.screens) > 0 {
+		scr := s.screens[s.screenIdx]
+		var pos string
+		if len(scr.Games) == 0 {
+			pos = "0 games"
+		} else {
+			pos = fmt.Sprintf("%d / %d", s.scroll+1, len(scr.Games))
+		}
+		pw, _, _ := s.sm.SizeUTF8(pos)
+		s.drawText(s.sm, pos, s.w-pad-int32(pw), y+h/2, true, colDim)
+	}
 }
 
-// drawText renders a UTF-8 string. vertCenter=true centers vertically on y.
+// --- navigation ---
+
+func (s *state) scrollUp() {
+	if s.scroll > 0 {
+		s.scroll--
+		s.resetTicker()
+	}
+}
+
+func (s *state) scrollDown() {
+	games := s.screens[s.screenIdx].Games
+	if s.scroll < len(games)-1 {
+		s.scroll++
+		s.resetTicker()
+	}
+}
+
+func (s *state) prevScreen() {
+	if len(s.screens) < 2 {
+		return
+	}
+	s.screenIdx = (s.screenIdx - 1 + len(s.screens)) % len(s.screens)
+	s.scroll = 0
+	s.resetTicker()
+}
+
+func (s *state) nextScreen() {
+	if len(s.screens) < 2 {
+		return
+	}
+	s.screenIdx = (s.screenIdx + 1) % len(s.screens)
+	s.scroll = 0
+	s.resetTicker()
+}
+
+func (s *state) switchTab() {
+	if s.tab == 0 {
+		s.tab = 1
+	} else {
+		s.tab = 0
+	}
+	s.resetTicker()
+}
+
+func (s *state) resetTicker() {
+	s.tickerShift = 0
+	s.tickerTick = 0
+}
+
+// --- helpers ---
+
 func (s *state) drawText(font *ttf.Font, text string, x, y int32, vertCenter bool, color sdl.Color) {
 	surf, err := font.RenderUTF8Blended(text, color)
 	if err != nil {
@@ -461,39 +607,6 @@ func (s *state) drawText(font *ttf.Font, text string, x, y int32, vertCenter boo
 	s.rend.Copy(tex, nil, dst)
 }
 
-// --- navigation ---
-
-func (s *state) scrollUp() {
-	if s.scroll > 0 {
-		s.scroll--
-	}
-}
-
-func (s *state) scrollDown() {
-	games := s.screens[s.screenIdx].Games
-	if s.scroll < len(games)-1 {
-		s.scroll++
-	}
-}
-
-func (s *state) prevScreen() {
-	if len(s.screens) < 2 {
-		return
-	}
-	s.screenIdx = (s.screenIdx - 1 + len(s.screens)) % len(s.screens)
-	s.scroll = 0
-}
-
-func (s *state) nextScreen() {
-	if len(s.screens) < 2 {
-		return
-	}
-	s.screenIdx = (s.screenIdx + 1) % len(s.screens)
-	s.scroll = 0
-}
-
-// --- helpers ---
-
 func formatDuration(secs int) string {
 	if secs < 60 {
 		return fmt.Sprintf("%ds", secs)
@@ -506,7 +619,6 @@ func formatDuration(secs int) string {
 	return fmt.Sprintf("%dh %02dm", h, m%60)
 }
 
-// openFont loads the embedded font first; falls back to filesystem candidates.
 func openFont(size int) (*ttf.Font, error) {
 	if len(embeddedFont) > 0 {
 		rw, err := sdl.RWFromMem(embeddedFont)
@@ -517,13 +629,12 @@ func openFont(size int) (*ttf.Font, error) {
 			}
 		}
 	}
-	// Filesystem fallback
 	for _, p := range fontCandidates {
 		if _, err := os.Stat(p); err == nil {
 			return ttf.OpenFont(p, size)
 		}
 	}
-	return nil, fmt.Errorf("no font available; embed failed and no fallback found")
+	return nil, fmt.Errorf("no font available")
 }
 
 func clamp(v, lo, hi int) int {
@@ -534,4 +645,11 @@ func clamp(v, lo, hi int) int {
 		return hi
 	}
 	return v
+}
+
+func max(a, b int32) int32 {
+	if a > b {
+		return a
+	}
+	return b
 }
