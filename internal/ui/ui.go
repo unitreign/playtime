@@ -18,8 +18,8 @@ const (
 	maxRows       = 8
 	fps           = 60
 	titleMaxChars = 20 // names longer than this scroll
-	tickerSpeed   = 3  // frames per pixel of scroll
-	tickerPause   = 90 // pixels of "pause" before scrolling starts
+	tickerSpeed   = 1  // frames per pixel of scroll
+	tickerPause   = 0  // no pause between scroll cycles
 )
 
 var fontCandidates = []string{
@@ -40,7 +40,6 @@ type state struct {
 	screens   []Screen
 	screenIdx int
 	scroll    int
-	tab       int // 0=Games 1=Stats
 
 	tickerTick  int
 	tickerShift int
@@ -60,8 +59,6 @@ var (
 	colSubtitle = sdl.Color{R: 110, G: 110, B: 110, A: 255}
 	colAccent   = sdl.Color{R: 200, G: 200, B: 200, A: 255}
 	colDim      = sdl.Color{R: 75, G: 75, B: 75, A: 255}
-	colTab      = sdl.Color{R: 200, G: 200, B: 200, A: 255}
-	colTabDim   = sdl.Color{R: 60, G: 60, B: 60, A: 255}
 )
 
 func Run(romsRoot string, fontData []byte) error {
@@ -246,8 +243,6 @@ func (s *state) loop() error {
 					s.prevScreen()
 				case sdl.K_RIGHT:
 					s.nextScreen()
-				case sdl.K_RETURN:
-					s.switchTab()
 				case sdl.K_ESCAPE, sdl.K_b:
 					return nil
 				}
@@ -270,8 +265,6 @@ func (s *state) loop() error {
 					s.prevScreen()
 				case sdl.CONTROLLER_BUTTON_RIGHTSHOULDER:
 					s.nextScreen()
-				case sdl.CONTROLLER_BUTTON_BACK:
-					s.switchTab()
 				case sdl.CONTROLLER_BUTTON_B, sdl.CONTROLLER_BUTTON_A, sdl.CONTROLLER_BUTTON_START:
 					return nil
 				}
@@ -303,13 +296,7 @@ func (s *state) render() {
 	visible := int(rowsH) / int(rowH)
 
 	s.renderHeader(headerH)
-
-	if s.tab == 0 {
-		s.renderRows(headerH, rowH, visible)
-	} else {
-		s.renderStats(headerH, rowsH)
-	}
-
+	s.renderRows(headerH, rowH, visible)
 	s.renderFooter(footerH, visible)
 }
 
@@ -320,12 +307,13 @@ func (s *state) renderHeader(h int32) {
 	s.rend.DrawLine(0, h-1, s.w, h-1)
 
 	pad := s.w / 64
+	scr := s.screens[s.screenIdx]
 
-	// Left: app name
-	s.drawText(s.sm, "PLAYTIME", pad, h/2, true, colDim)
+	// Left: total play time for current screen
+	timeStr := formatDuration(scr.TotalSecs)
+	s.drawText(s.sm, timeStr, pad, h/2, true, colDim)
 
 	// Right: current screen label
-	scr := s.screens[s.screenIdx]
 	lw, _, _ := s.sm.SizeUTF8(scr.Label)
 	s.drawText(s.sm, scr.Label, s.w-pad-int32(lw), h/2, true, colAccent)
 }
@@ -449,59 +437,6 @@ func (s *state) renderRow(g gamelist.GameStats, y, rowH int32) {
 	s.drawText(s.sm, "Opened", col2Right-int32(olw), subtitleY, false, colSubtitle)
 }
 
-func (s *state) renderStats(offsetY, areaH int32) {
-	totalSecs, games, consoles, opens, avgSecs := s.statsData()
-
-	pad := s.w / 64
-	x := pad * 4
-
-	type stat struct {
-		value string
-		label string
-	}
-	stats := []stat{
-		{formatDuration(totalSecs), "Total Play Time"},
-		{fmt.Sprintf("%d", games), "Games Played"},
-		{fmt.Sprintf("%d", consoles), "Consoles"},
-		{fmt.Sprintf("%d", opens), "Times Opened"},
-		{formatDuration(avgSecs), "Avg Session"},
-	}
-
-	// 2-column grid
-	colW := s.w / 2
-	rowH := areaH / 3
-	for i, st := range stats {
-		col := int32(i % 2)
-		row := int32(i / 2)
-		cx := x + col*colW
-		cy := offsetY + row*rowH + rowH/4
-
-		s.drawText(s.font, st.value, cx, cy, false, colTitle)
-		s.drawText(s.sm, st.label, cx, cy+int32(s.font.Height())+4, false, colSubtitle)
-	}
-}
-
-func (s *state) statsData() (totalSecs, games, consoles, opens, avgSecs int) {
-	if len(s.screens) == 0 {
-		return
-	}
-	allGames := s.screens[0].Games
-	totalSecs = s.screens[0].TotalSecs
-	games = len(allGames)
-	for _, g := range allGames {
-		opens += g.Plays
-	}
-	if opens > 0 {
-		avgSecs = totalSecs / opens
-	}
-	skip := map[string]bool{"All Games": true, "Videos": true, "Tools": true}
-	for _, scr := range s.screens {
-		if !skip[scr.Label] {
-			consoles++
-		}
-	}
-	return
-}
 
 func (s *state) renderFooter(h int32, visible int) {
 	y := s.h - h
@@ -510,21 +445,11 @@ func (s *state) renderFooter(h int32, visible int) {
 
 	pad := s.w / 64
 
-	// Tabs
-	gamesColor := colTabDim
-	statsColor := colTabDim
-	if s.tab == 0 {
-		gamesColor = colTab
-	} else {
-		statsColor = colTab
-	}
+	// Left: tooltips
+	s.drawText(s.sm, "B  exit    L  R  switch", pad, y+h/2, true, colDim)
 
-	gw, _, _ := s.sm.SizeUTF8("Games")
-	s.drawText(s.sm, "Games", pad, y+h/2, true, gamesColor)
-	s.drawText(s.sm, "Stats", pad+int32(gw)+pad*3, y+h/2, true, statsColor)
-
-	// Right: game count (Games tab only)
-	if s.tab == 0 && len(s.screens) > 0 {
+	// Right: game count
+	if len(s.screens) > 0 {
 		scr := s.screens[s.screenIdx]
 		var pos string
 		if len(scr.Games) == 0 {
@@ -569,15 +494,6 @@ func (s *state) nextScreen() {
 	}
 	s.screenIdx = (s.screenIdx + 1) % len(s.screens)
 	s.scroll = 0
-	s.resetTicker()
-}
-
-func (s *state) switchTab() {
-	if s.tab == 0 {
-		s.tab = 1
-	} else {
-		s.tab = 0
-	}
 	s.resetTicker()
 }
 
