@@ -3,6 +3,7 @@ package ui
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/unitreign/playtime/internal/gamelist"
 	"github.com/veandco/go-sdl2/img"
@@ -143,6 +144,8 @@ func (s *state) loadData(romsRoot string) error {
 
 	// Systems routed to their own side screen, excluded from All Games.
 	// Multiple system keys can share a label — they merge into one screen.
+	// Any ROM under /userdata/roms/tools/ is also forced to Tools regardless
+	// of its system name (catches ODCommander and similar tools with odd names).
 	sideScreens := map[string]string{
 		"mpv":   "Videos",
 		"sh":    "Tools",
@@ -159,12 +162,19 @@ func (s *state) loadData(romsRoot string) error {
 	var games []gamelist.GameStats
 	gamesTotal := 0
 	for _, g := range allGames {
+		sideLabel := ""
 		if label, ok := sideScreens[g.System]; ok {
-			if sidesByLabel[label] == nil {
-				sidesByLabel[label] = &sideData{}
+			sideLabel = label
+		} else if strings.HasPrefix(g.RomPath, "/userdata/roms/tools/") {
+			sideLabel = "Tools"
+		}
+
+		if sideLabel != "" {
+			if sidesByLabel[sideLabel] == nil {
+				sidesByLabel[sideLabel] = &sideData{}
 			}
-			sidesByLabel[label].games = append(sidesByLabel[label].games, g)
-			sidesByLabel[label].total += g.TotalSecs
+			sidesByLabel[sideLabel].games = append(sidesByLabel[sideLabel].games, g)
+			sidesByLabel[sideLabel].total += g.TotalSecs
 		} else {
 			games = append(games, g)
 			gamesTotal += g.TotalSecs
@@ -363,14 +373,19 @@ func (s *state) renderRow(g gamelist.GameStats, rank int, y, rowH int32) {
 
 	if tex, ok := s.covers[g.RomPath]; ok {
 		_, _, imgW, imgH, _ := tex.Query()
-		// Scale to height, preserve aspect ratio, center horizontally.
-		dstH := coverSize
-		dstW := coverSize
-		if imgH > 0 {
-			dstW = int32(float32(imgW) * float32(dstH) / float32(imgH))
+		dstW, dstH := coverSize, coverSize
+		if imgW > 0 && imgH > 0 {
+			if imgH >= imgW {
+				// Portrait — fit height, center horizontally
+				dstW = int32(float32(imgW) * float32(coverSize) / float32(imgH))
+			} else {
+				// Landscape — fit width, center vertically
+				dstH = int32(float32(imgH) * float32(coverSize) / float32(imgW))
+			}
 		}
 		dstX := coverX + (coverSize-dstW)/2
-		s.rend.Copy(tex, nil, &sdl.Rect{X: dstX, Y: coverY, W: dstW, H: dstH})
+		dstY := coverY + (coverSize-dstH)/2
+		s.rend.Copy(tex, nil, &sdl.Rect{X: dstX, Y: dstY, W: dstW, H: dstH})
 	} else {
 		// Placeholder: filled rect
 		s.rend.SetDrawColor(30, 35, 55, 255)
@@ -382,7 +397,11 @@ func (s *state) renderRow(g gamelist.GameStats, rank int, y, rowH int32) {
 	nameY := y + rowH/2 - int32(s.font.Height())/2 - 1
 	sysY := nameY + int32(s.font.Height()) + 2
 
-	s.drawText(s.font, g.RomName, infoX, nameY, false, sdl.Color{R: 225, G: 225, B: 225, A: 255})
+	name := g.RomName
+	if runes := []rune(name); len(runes) > 30 {
+		name = string(runes[:29]) + "…"
+	}
+	s.drawText(s.font, name, infoX, nameY, false, sdl.Color{R: 225, G: 225, B: 225, A: 255})
 	s.drawText(s.sm, fmt.Sprintf("%s · avg %s", g.System, formatDuration(g.AvgSecs)),
 		infoX, sysY, false, sdl.Color{R: 110, G: 110, B: 110, A: 255})
 

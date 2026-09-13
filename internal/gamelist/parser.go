@@ -44,6 +44,11 @@ func (g *Game) coverPath(romDir string) string {
 	return ""
 }
 
+// maxGameTime caps accepted gametime values. Knulli has a known bug where it
+// occasionally writes a Unix timestamp into <gametime> instead of a duration.
+// Anything over ~2000 hours (7,200,000 s) is treated as corrupted and skipped.
+const maxGameTime = 7_200_000
+
 func loadSystem(romDir, system string, minDuration int) ([]GameStats, error) {
 	f, err := os.Open(filepath.Join(romDir, "gamelist.xml"))
 	if err != nil {
@@ -58,7 +63,7 @@ func loadSystem(romDir, system string, minDuration int) ([]GameStats, error) {
 
 	var out []GameStats
 	for _, g := range gl.Games {
-		if g.GameTime <= minDuration {
+		if g.GameTime <= minDuration || g.GameTime > maxGameTime {
 			continue
 		}
 		romPath := resolve(g.Path, romDir)
