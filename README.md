@@ -14,7 +14,7 @@ Knulli has no built-in play time tracking. PlayTime adds it. A hook script recor
 
 1. Download the latest release from the [Releases](https://github.com/unitreign/playtime/releases) page.
 2. Extract and copy the `PlayTime` folder to `/userdata/roms/tools/` on your device.
-3. Refresh EmulationStation's game list so the tool appears under **Tools**.
+3. Refresh Knulli's game list so the tool appears under **Tools**.
 4. Launch **PlayTime** from the Tools menu. It installs its hooks and opens the UI.
 
 No reboot required. Tracking starts immediately for any game launched after installation.
@@ -23,7 +23,7 @@ No reboot required. Tracking starts immediately for any game launched after inst
 
 ### Time Tracking
 
-* Hooks into EmulationStation's `gameStart` and `gameStop` events
+* Hooks into Knulli's `gameStart` and `gameStop` events
 * Every session is recorded with system, game name, start time, and duration
 * Short or accidental launches are filtered out automatically
 * Play history survives firmware updates — data lives in `/userdata/system/configs/playtime/`
@@ -44,7 +44,7 @@ No reboot required. Tracking starts immediately for any game launched after inst
 
 ## How It Works
 
-PlayTime installs a single hook script at `/userdata/system/scripts/playtime-hook.sh`. EmulationStation calls every script in that directory for every game event.
+PlayTime installs a single hook script at `/userdata/system/scripts/playtime-hook.sh`. Knulli calls every script in that directory for every game event.
 
 When a game starts, the hook calls `playtime session start` in the background. When the game exits, it calls `playtime session end`. Sessions are stored in a SQLite database at `/userdata/system/configs/playtime/playtime.db`.
 
@@ -54,9 +54,16 @@ The UI reads the database and the system gamelists, then renders a sorted shelf 
 
 ## Uninstall
 
-Run `playtime uninstall` from a shell to remove the hook script.
+**Option 1 — command:**
 
-Play history at `/userdata/system/configs/playtime/` is not removed automatically. Delete that folder manually to wipe all data.
+Run `playtime uninstall` from a shell. This removes the hook script. Then delete these two folders manually to remove everything:
+
+* `/userdata/roms/tools/PlayTime/` — the app
+* `/userdata/system/configs/playtime/` — all play history
+
+**Option 2 — manual:**
+
+Delete both folders above directly. Also check `/userdata/system/scripts/` and remove `playtime-hook.sh` if it is there.
 
 ## System Details
 
