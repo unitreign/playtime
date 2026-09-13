@@ -60,12 +60,11 @@ func runSession(args []string) {
 	}
 	action, system := args[0], args[1]
 
-	// Find the rom path by scanning for the first absolute filesystem path in
-	// the remaining args. This is robust to Knulli/Batocera arg-order variations
-	// (e.g. $3=emulator $4=rom $5=core vs $3=core $4=emulator $5=rom).
+	// ROMs are always under /userdata/roms/ on Knulli/Batocera.
+	// Cores/emulators live under /usr/lib/ or /usr/bin/ — excluded by this prefix.
 	romPath := ""
 	for _, a := range args[2:] {
-		if len(a) > 1 && a[0] == '/' {
+		if strings.HasPrefix(a, "/userdata/roms/") {
 			romPath = a
 			break
 		}
