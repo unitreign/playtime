@@ -374,7 +374,15 @@ func (s *state) renderRow(g db.GameStats, rank int, y, rowH int32) {
 	coverRect := &sdl.Rect{X: coverX, Y: coverY, W: coverSize, H: coverSize}
 
 	if tex, ok := s.covers[g.RomPath]; ok {
-		s.rend.Copy(tex, nil, coverRect)
+		_, _, imgW, imgH, _ := tex.Query()
+		// Scale to height, preserve aspect ratio, center horizontally.
+		dstH := coverSize
+		dstW := coverSize
+		if imgH > 0 {
+			dstW = int32(float32(imgW) * float32(dstH) / float32(imgH))
+		}
+		dstX := coverX + (coverSize-dstW)/2
+		s.rend.Copy(tex, nil, &sdl.Rect{X: dstX, Y: coverY, W: dstW, H: dstH})
 	} else {
 		// Placeholder: filled rect
 		s.rend.SetDrawColor(30, 35, 55, 255)
