@@ -1,6 +1,6 @@
 # PlayTime
 
-Gameplay time tracker for **Knulli CFW** on Anbernic handhelds.
+A play time viewer for **Knulli CFW** on Anbernic handhelds.
 
 <p align="center">
   <a href="https://github.com/unitreign/playtime/releases/latest"><img src="https://img.shields.io/github/v/release/unitreign/playtime?label=version&color=black" alt="Release"></a>
@@ -8,7 +8,7 @@ Gameplay time tracker for **Knulli CFW** on Anbernic handhelds.
   <a href="https://ko-fi.com/unitreign"><img src="https://img.shields.io/badge/Ko--fi-support-ff5e5b?logo=ko-fi&logoColor=white" alt="Ko-fi"></a>
 </p>
 
-Knulli has no built-in play time tracking. PlayTime adds it. A hook script records every session automatically, and a shelf-style UI shows your most-played games sorted by time — across all consoles or filtered to one.
+Knulli tracks play time in each system's `gamelist.xml` — but there is no UI to see it. PlayTime reads that data and shows your most-played games in a shelf-style view, sorted by time, across all consoles or filtered to one.
 
 <p align="center">
   <img src="images/preview.png" alt="PlayTime running on an Anbernic handheld" width="600">
@@ -21,25 +21,18 @@ Knulli has no built-in play time tracking. PlayTime adds it. A hook script recor
 1. Download the latest release from the [Releases](https://github.com/unitreign/playtime/releases) page.
 2. Extract and copy the `PlayTime` folder to `/userdata/roms/tools/` on your device.
 3. Refresh Knulli's game list so the tool appears under **Tools**.
-4. Launch **PlayTime** from the Tools menu. It installs its hooks and opens the UI.
+4. Launch **PlayTime** from the Tools menu.
 
-No reboot required. Tracking starts immediately for any game launched after installation.
+No setup required. If you have played games on Knulli, they will appear immediately.
 
 ## Features
 
-### Time Tracking
-
-* Hooks into Knulli's `gameStart` and `gameStop` events
-* Every session is recorded with system, game name, start time, and duration
-* Short or accidental launches are filtered out automatically
-* Play history survives firmware updates — data lives in `/userdata/system/configs/playtime/`
-
 ### Library View
 
-* **All Games** — every game you have played, sorted by total play time
-* **Per-console views** — switch between consoles with L and R to see that system's games only
-* Game names pulled from each system's `gamelist.xml`; cover art loaded from the same source
-* Session count and average session length shown alongside total time
+* **All Games** — every game with recorded play time, sorted by total time
+* **Per-console views** — switch between consoles with L and R
+* Game names and cover art pulled from each system's `gamelist.xml`
+* Play count and average session length shown alongside total time
 
 ### UI
 
@@ -50,37 +43,23 @@ No reboot required. Tracking starts immediately for any game launched after inst
 
 ## How It Works
 
-PlayTime installs a single hook script at `/userdata/system/scripts/playtime-hook.sh`. Knulli calls every script in that directory for every game event.
+Knulli records `<gametime>` and `<playcount>` in each system's `gamelist.xml` as you play. PlayTime reads those files across all your systems, filters out anything too short to count, and renders the results as a sorted list.
 
-When a game starts, the hook calls `playtime session start` in the background. When the game exits, it calls `playtime session end`. Sessions are stored in a SQLite database at `/userdata/system/configs/playtime/playtime.db`.
-
-ROM paths are always under `/userdata/roms/`. Core and emulator paths are under `/usr/lib/` or `/usr/bin/`. PlayTime identifies the ROM from the positional arguments by looking for a path that starts with `/userdata/roms/` — no emulator name lists, no hardcoding.
-
-The UI reads the database and the system gamelists, then renders a sorted shelf of your games.
+No database, no background processes, no hooks. Everything PlayTime shows is data Knulli already collected.
 
 ## Uninstall
 
-**Option 1 — command:**
-
-Run `playtime uninstall` from a shell. This removes the hook script. Then delete these two folders manually to remove everything:
-
-* `/userdata/roms/tools/PlayTime/` — the app
-* `/userdata/system/configs/playtime/` — all play history
-
-**Option 2 — manual:**
-
-Delete both folders above directly. Also check `/userdata/system/scripts/` and remove `playtime-hook.sh` if it is there.
+Delete the `PlayTime` folder from `/userdata/roms/tools/`. Nothing else was installed.
 
 ## System Details
 
-|               |                                                           |
-| ------------- | --------------------------------------------------------- |
-| **Firmware**  | Knulli CFW (Batocera-based)                               |
+|               |                                                              |
+| ------------- | ------------------------------------------------------------ |
+| **Firmware**  | Knulli CFW (Batocera-based)                                  |
 | **Devices**   | All Knulli-supported devices · Tested on RG34XX and RG35XXSP |
-| **Data**      | SQLite · `/userdata/system/configs/playtime/playtime.db`  |
-| **Hooks**     | `/userdata/system/scripts/playtime-hook.sh`               |
-| **Install**   | `/userdata/roms/tools/PlayTime/`                          |
-| **License**   | GPL-3.0                                                   |
+| **Data**      | Reads from each system's `gamelist.xml`                      |
+| **Install**   | `/userdata/roms/tools/PlayTime/`                             |
+| **License**   | GPL-3.0                                                      |
 
 ## License
 
