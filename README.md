@@ -38,7 +38,7 @@ No reboot required. Tracking starts immediately for any game launched after inst
 ### UI
 
 * Monochrome design — no colour, no clutter
-* Adapts to any screen resolution, including the RG34XX and RG35XX
+* Adapts to any screen resolution — tested on RG34XX and RG35XXSP
 * Controller-native: no touch required
 * B to exit, L / R to switch consoles
 
@@ -70,7 +70,7 @@ Delete both folders above directly. Also check `/userdata/system/scripts/` and r
 |               |                                                           |
 | ------------- | --------------------------------------------------------- |
 | **Firmware**  | Knulli CFW (Batocera-based)                               |
-| **Devices**   | Anbernic RG34XX · RG35XX and compatible                   |
+| **Devices**   | All Knulli-supported devices · Tested on RG34XX and RG35XXSP |
 | **Data**      | SQLite · `/userdata/system/configs/playtime/playtime.db`  |
 | **Hooks**     | `/userdata/system/scripts/playtime-hook.sh`               |
 | **Install**   | `/userdata/roms/tools/PlayTime/`                          |
