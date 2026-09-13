@@ -3,9 +3,7 @@ package ui
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 
-	"github.com/unitreign/playtime/internal/db"
 	"github.com/unitreign/playtime/internal/gamelist"
 	"github.com/veandco/go-sdl2/img"
 	"github.com/veandco/go-sdl2/sdl"
@@ -33,7 +31,7 @@ var fontCandidates = []string{
 // Screen represents one L/R navigation view.
 type Screen struct {
 	Label     string // "All Games" | system name
-	Games     []db.GameStats
+	Games     []gamelist.GameStats
 	TotalSecs int
 }
 
@@ -51,7 +49,7 @@ type state struct {
 	w, h int32
 }
 
-func Run(store *db.Store, romsRoot string, fontData []byte) error {
+func Run(romsRoot string, fontData []byte) error {
 	embeddedFont = fontData
 	if err := sdl.Init(sdl.INIT_VIDEO | sdl.INIT_GAMECONTROLLER); err != nil {
 		return fmt.Errorf("sdl init: %w", err)
@@ -121,36 +119,24 @@ func Run(store *db.Store, romsRoot string, fontData []byte) error {
 		covers: make(map[string]*sdl.Texture),
 	}
 
-	if err := s.loadData(store, romsRoot); err != nil {
+	if err := s.loadData(romsRoot); err != nil {
 		return err
 	}
 
 	return s.loop()
 }
 
-func (s *state) loadData(store *db.Store, romsRoot string) error {
-	allGames, err := store.TopGames(minDuration)
+func (s *state) loadData(romsRoot string) error {
+	allGames, err := gamelist.AllGames(romsRoot, minDuration)
 	if err != nil {
 		return err
 	}
 
-	systems, err := store.Systems(minDuration)
-	if err != nil {
-		return err
-	}
-
-	gamelists, _ := gamelist.LoadAll(romsRoot)
-
-	// Override stored romName with scraped title and preload covers for every game.
-	for i, g := range allGames {
-		if entry, ok := gamelists[g.RomPath]; ok {
-			if entry.Name != "" {
-				allGames[i].RomName = entry.Name
-			}
-			if coverPath := entry.CoverPath(filepath.Dir(g.RomPath)); coverPath != "" {
-				if tex, err := img.LoadTexture(s.rend, coverPath); err == nil {
-					s.covers[g.RomPath] = tex
-				}
+	// Preload cover textures.
+	for _, g := range allGames {
+		if g.CoverPath != "" {
+			if tex, err := img.LoadTexture(s.rend, g.CoverPath); err == nil {
+				s.covers[g.RomPath] = tex
 			}
 		}
 	}
@@ -163,10 +149,14 @@ func (s *state) loadData(store *db.Store, romsRoot string) error {
 		"tools": "Tools",
 	}
 
-	type sideData struct{ games []db.GameStats; total int }
+	type sideData struct {
+		games []gamelist.GameStats
+		total int
+	}
 	sidesByLabel := map[string]*sideData{}
+	bySystem := map[string][]gamelist.GameStats{}
 
-	var games []db.GameStats
+	var games []gamelist.GameStats
 	gamesTotal := 0
 	for _, g := range allGames {
 		if label, ok := sideScreens[g.System]; ok {
@@ -178,32 +168,30 @@ func (s *state) loadData(store *db.Store, romsRoot string) error {
 		} else {
 			games = append(games, g)
 			gamesTotal += g.TotalSecs
+			bySystem[g.System] = append(bySystem[g.System], g)
 		}
 	}
 
-	s.screens = make([]Screen, 0, 2+len(systems))
-	s.screens = append(s.screens, Screen{
+	s.screens = []Screen{{
 		Label:     "All Games",
 		Games:     games,
 		TotalSecs: gamesTotal,
-	})
+	}}
 
-	for _, sys := range systems {
-		if _, excluded := sideScreens[sys]; excluded {
+	// Per-system screens in stable order (derived from sorted allGames).
+	seen := map[string]bool{}
+	for _, g := range games {
+		if seen[g.System] {
 			continue
 		}
-		sysGames, _ := store.TopGamesBySystem(sys, minDuration)
-		for i, g := range sysGames {
-			if entry, ok := gamelists[g.RomPath]; ok && entry.Name != "" {
-				sysGames[i].RomName = entry.Name
-			}
-		}
+		seen[g.System] = true
+		sysGames := bySystem[g.System]
 		total := 0
-		for _, g := range sysGames {
-			total += g.TotalSecs
+		for _, sg := range sysGames {
+			total += sg.TotalSecs
 		}
 		s.screens = append(s.screens, Screen{
-			Label:     sys,
+			Label:     g.System,
 			Games:     sysGames,
 			TotalSecs: total,
 		})
@@ -355,7 +343,7 @@ func (s *state) renderRows(scr Screen, offsetY, rowH int32, visible int) {
 	}
 }
 
-func (s *state) renderRow(g db.GameStats, rank int, y, rowH int32) {
+func (s *state) renderRow(g gamelist.GameStats, rank int, y, rowH int32) {
 	pad := int32(s.w) / 64
 
 	// Separator

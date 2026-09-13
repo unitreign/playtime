@@ -4,23 +4,35 @@ import (
 	"encoding/xml"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
 type Game struct {
 	Path      string `xml:"path"`
 	Name      string `xml:"name"`
-	Thumbnail string `xml:"thumbnail"` // box art — preferred
-	Image     string `xml:"image"`     // screenshot/mix — fallback
+	Image     string `xml:"image"`
+	Thumbnail string `xml:"thumbnail"`
+	GameTime  int    `xml:"gametime"`
+	PlayCount int    `xml:"playcount"`
+}
+
+// GameStats is a resolved, display-ready summary for one game.
+type GameStats struct {
+	RomPath   string
+	RomName   string
+	System    string
+	TotalSecs int
+	Plays     int
+	AvgSecs   int
+	CoverPath string // absolute path, empty if none found
 }
 
 type gameList struct {
 	Games []Game `xml:"game"`
 }
 
-// CoverPath returns the absolute path to the best available cover art.
-// Prefers <image> (full art) over <thumbnail> (small box art).
-func (g *Game) CoverPath(romDir string) string {
+func (g *Game) coverPath(romDir string) string {
 	for _, rel := range []string{g.Image, g.Thumbnail} {
 		if rel == "" {
 			continue
@@ -32,9 +44,7 @@ func (g *Game) CoverPath(romDir string) string {
 	return ""
 }
 
-// LoadSystem parses gamelist.xml in romDir and returns a map of
-// absolute rom path → *Game.
-func LoadSystem(romDir string) (map[string]*Game, error) {
+func loadSystem(romDir, system string, minDuration int) ([]GameStats, error) {
 	f, err := os.Open(filepath.Join(romDir, "gamelist.xml"))
 	if err != nil {
 		return nil, err
@@ -46,35 +56,59 @@ func LoadSystem(romDir string) (map[string]*Game, error) {
 		return nil, err
 	}
 
-	m := make(map[string]*Game, len(gl.Games))
-	for i := range gl.Games {
-		g := &gl.Games[i]
-		m[resolve(g.Path, romDir)] = g
+	var out []GameStats
+	for _, g := range gl.Games {
+		if g.GameTime <= minDuration {
+			continue
+		}
+		romPath := resolve(g.Path, romDir)
+		name := g.Name
+		if name == "" {
+			base := filepath.Base(romPath)
+			name = strings.TrimSuffix(base, filepath.Ext(base))
+		}
+		avg := 0
+		if g.PlayCount > 0 {
+			avg = g.GameTime / g.PlayCount
+		}
+		out = append(out, GameStats{
+			RomPath:   romPath,
+			RomName:   name,
+			System:    system,
+			TotalSecs: g.GameTime,
+			Plays:     g.PlayCount,
+			AvgSecs:   avg,
+			CoverPath: g.coverPath(romDir),
+		})
 	}
-	return m, nil
+	return out, nil
 }
 
-// LoadAll walks romsRoot (e.g. /userdata/roms), loads every system's
-// gamelist.xml, and returns a merged map of absolute rom path → *Game.
-func LoadAll(romsRoot string) (map[string]*Game, error) {
+// AllGames returns all games with gametime > minDuration across every system
+// directory under romsRoot, sorted by total play time descending.
+func AllGames(romsRoot string, minDuration int) ([]GameStats, error) {
 	entries, err := os.ReadDir(romsRoot)
 	if err != nil {
 		return nil, err
 	}
-	result := make(map[string]*Game)
+
+	var all []GameStats
 	for _, e := range entries {
 		if !e.IsDir() {
 			continue
 		}
-		games, err := LoadSystem(filepath.Join(romsRoot, e.Name()))
+		system := e.Name()
+		games, err := loadSystem(filepath.Join(romsRoot, system), system, minDuration)
 		if err != nil {
-			continue // no gamelist.xml — skip silently
+			continue // no gamelist.xml or unreadable — skip silently
 		}
-		for k, v := range games {
-			result[k] = v
-		}
+		all = append(all, games...)
 	}
-	return result, nil
+
+	sort.Slice(all, func(i, j int) bool {
+		return all[i].TotalSecs > all[j].TotalSecs
+	})
+	return all, nil
 }
 
 func resolve(path, romDir string) string {
