@@ -61,6 +61,16 @@ Delete the `PlayTime` folder from `/userdata/roms/tools/`. Nothing else was inst
 | **Install**   | `/userdata/roms/tools/PlayTime/`                             |
 | **License**   | GPL-3.0                                                      |
 
+## Known Issues
+
+### Corrupted gametime values
+
+Knulli (and the Batocera EmulationStation it is based on) has a known bug where `<gametime>` in `gamelist.xml` can be written as a garbage value — typically a Unix timestamp or an overflowed number — instead of actual elapsed seconds. This usually affects games played for longer sessions and appears to be triggered by the scraper or by ES itself in certain conditions.
+
+PlayTime skips any game whose recorded time exceeds 2,000 hours. Games affected by this bug will not appear in the list until Knulli writes a corrected value. There is no fix on our end — the data has to be correct in `gamelist.xml` first.
+
+If a game you have played is missing, open its `gamelist.xml` and check the `<gametime>` value. An obviously wrong number (9 digits or more) confirms the bug.
+
 ## License
 
 PlayTime is licensed under the **GNU General Public License v3.0**.
