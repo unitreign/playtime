@@ -10,6 +10,12 @@ Gameplay time tracker for **Knulli CFW** on Anbernic handhelds.
 
 Knulli has no built-in play time tracking. PlayTime adds it. A hook script records every session automatically, and a shelf-style UI shows your most-played games sorted by time — across all consoles or filtered to one.
 
+<p align="center">
+  <img src="images/preview.png" alt="PlayTime running on an Anbernic handheld" width="600">
+  <br>
+  <sub>Background removed with AI — device photo taken from my own setup.</sub>
+</p>
+
 ## Install
 
 1. Download the latest release from the [Releases](https://github.com/unitreign/playtime/releases) page.
