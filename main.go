@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+
 	"github.com/unitreign/playtime/internal/db"
 	"github.com/unitreign/playtime/internal/ui"
 )
@@ -54,13 +56,11 @@ func runUI() {
 
 func runSession(args []string) {
 	if len(args) < 3 {
-		die("usage: playtime session <start|end> <system> <rom_path> [rom_name]")
+		die("usage: playtime session <start|end> <system> <rom_path>")
 	}
 	action, system, romPath := args[0], args[1], args[2]
-	romName := filepath.Base(romPath)
-	if len(args) >= 4 {
-		romName = args[3]
-	}
+	base := filepath.Base(romPath)
+	romName := strings.TrimSuffix(base, filepath.Ext(base))
 
 	store, err := openStore()
 	if err != nil {
@@ -103,14 +103,15 @@ func installHooks(appDir, scriptsDir string) {
 
 	bin := filepath.Join(appDir, appName)
 
+	// Knulli/Batocera ES args: $1=event $2=system $3=rom_path $4=emulator
 	hook := fmt.Sprintf(`#!/bin/sh
 # Managed by PlayTime — do not edit manually.
 case "$1" in
   gameStart)
-    "%s" session start "$2" "$4" "$(basename "$4")" &
+    "%s" session start "$2" "$3" &
     ;;
   gameStop)
-    "%s" session end "$2" "$4" "$(basename "$4")"
+    "%s" session end "$2" "$3"
     ;;
 esac
 `, bin, bin)

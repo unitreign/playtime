@@ -16,9 +16,8 @@ import (
 var embeddedFont []byte
 
 const (
-	minDuration = 10  // sessions under 10s are ignored
-	minRowH     = 86  // minimum row height in pixels (targets ~5 rows on 480p)
-	maxRows     = 8   // cap for very tall outputs (HDMI)
+	minDuration = 10 // sessions under 10s are ignored
+	maxRows     = 8  // cap for very tall outputs (HDMI)
 	fps         = 60
 )
 
@@ -101,15 +100,15 @@ func Run(store *db.Store, romsRoot string, fontData []byte) error {
 
 	w, h := win.GetSize()
 
-	// Minimum 14px so the UI is readable on small screens like the RG34XX (272p).
-	baseFontSize := max(14, int(float32(h)*0.033))
+	// 0.04×h with a 16px floor — keeps text legible on 272p screens (RG34XX).
+	baseFontSize := max(16, int(float32(h)*0.04))
 	font, err := openFont(baseFontSize)
 	if err != nil {
 		return fmt.Errorf("open font: %w", err)
 	}
 	defer font.Close()
 
-	sm, err := openFont(int(float32(baseFontSize) * 0.7))
+	sm, err := openFont(max(13, int(float32(baseFontSize)*0.8)))
 	if err != nil {
 		return fmt.Errorf("open small font: %w", err)
 	}
@@ -141,8 +140,15 @@ func (s *state) loadData(store *db.Store, romsRoot string) error {
 		return err
 	}
 
-	// Load gamelists for cover art
+	// Load gamelists for scraped titles and cover art
 	gamelists, _ := gamelist.LoadAll(romsRoot)
+
+	// Override stored romName with scraped title from gamelist.xml when available
+	for i, g := range allGames {
+		if entry, ok := gamelists[g.RomPath]; ok && entry.Name != "" {
+			allGames[i].RomName = entry.Name
+		}
+	}
 
 	// Pre-load cover textures for all games
 	for _, g := range allGames {
