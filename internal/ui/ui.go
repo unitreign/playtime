@@ -147,9 +147,10 @@ func (s *state) loadData(romsRoot string) error {
 	// Any ROM under /userdata/roms/tools/ is also forced to Tools regardless
 	// of its system name (catches ODCommander and similar tools with odd names).
 	sideScreens := map[string]string{
-		"mpv":   "Videos",
-		"sh":    "Tools",
-		"tools": "Tools",
+		"mpv":         "Videos",
+		"sh":          "Tools",
+		"tools":       "Tools",
+		"odcommander": "Tools",
 	}
 
 	type sideData struct {
