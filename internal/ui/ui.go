@@ -100,15 +100,15 @@ func Run(store *db.Store, romsRoot string, fontData []byte) error {
 
 	w, h := win.GetSize()
 
-	// 0.04×h with a 16px floor — keeps text legible on 272p screens (RG34XX).
-	baseFontSize := max(16, int(float32(h)*0.04))
+	// 0.05×h with an 18px floor — slightly larger for readability on small screens.
+	baseFontSize := max(18, int(float32(h)*0.05))
 	font, err := openFont(baseFontSize)
 	if err != nil {
 		return fmt.Errorf("open font: %w", err)
 	}
 	defer font.Close()
 
-	sm, err := openFont(max(13, int(float32(baseFontSize)*0.8)))
+	sm, err := openFont(max(14, int(float32(baseFontSize)*0.8)))
 	if err != nil {
 		return fmt.Errorf("open small font: %w", err)
 	}
@@ -155,25 +155,26 @@ func (s *state) loadData(store *db.Store, romsRoot string) error {
 		}
 	}
 
-	// Systems that get their own side screen instead of appearing in All Games.
-	// key=system name, value=screen label.
+	// Systems routed to their own side screen, excluded from All Games.
+	// Multiple system keys can share a label — they merge into one screen.
 	sideScreens := map[string]string{
-		"mpv": "Videos",
-		"sh":  "Tools",
+		"mpv":   "Videos",
+		"sh":    "Tools",
+		"tools": "Tools",
 	}
 
-	type sideEntry struct{ games []db.GameStats; total int }
-	sides := make(map[string]*sideEntry)
-	for k := range sideScreens {
-		sides[k] = &sideEntry{}
-	}
+	type sideData struct{ games []db.GameStats; total int }
+	sidesByLabel := map[string]*sideData{}
 
 	var games []db.GameStats
 	gamesTotal := 0
 	for _, g := range allGames {
-		if s, ok := sides[g.System]; ok {
-			s.games = append(s.games, g)
-			s.total += g.TotalSecs
+		if label, ok := sideScreens[g.System]; ok {
+			if sidesByLabel[label] == nil {
+				sidesByLabel[label] = &sideData{}
+			}
+			sidesByLabel[label].games = append(sidesByLabel[label].games, g)
+			sidesByLabel[label].total += g.TotalSecs
 		} else {
 			games = append(games, g)
 			gamesTotal += g.TotalSecs
@@ -208,15 +209,13 @@ func (s *state) loadData(store *db.Store, romsRoot string) error {
 		})
 	}
 
-	// Side screens (Videos, Tools, …) — appended last in a stable order.
-	for _, key := range []string{"mpv", "sh"} {
-		label := sideScreens[key]
-		entry := sides[key]
-		if len(entry.games) > 0 {
+	// Side screens appended last in stable order.
+	for _, label := range []string{"Videos", "Tools"} {
+		if d := sidesByLabel[label]; d != nil && len(d.games) > 0 {
 			s.screens = append(s.screens, Screen{
 				Label:     label,
-				Games:     entry.games,
-				TotalSecs: entry.total,
+				Games:     d.games,
+				TotalSecs: d.total,
 			})
 		}
 	}
@@ -315,19 +314,19 @@ func (s *state) renderHeader(scr Screen, h int32) {
 	pad := int32(s.w) / 64
 
 	// Title — left
-	s.drawText(s.sm, "PLAYTIME", pad, h/2, true, sdl.Color{R: 184, G: 148, B: 60, A: 255})
+	s.drawText(s.sm, "PLAYTIME", pad, h/2, true, sdl.Color{R: 160, G: 160, B: 160, A: 255})
 
-	// Nav indicator — truly centered, uses main font so arrows are visible
+	// Nav indicator — truly centered, ASCII arrows (safe for any embedded font)
 	if len(s.screens) > 1 {
-		label := fmt.Sprintf("◂  %s  ▸", scr.Label)
+		label := fmt.Sprintf("< %s >", scr.Label)
 		lw, _, _ := s.font.SizeUTF8(label)
-		s.drawText(s.font, label, s.w/2-int32(lw)/2, h/2, true, sdl.Color{R: 100, G: 110, B: 160, A: 255})
+		s.drawText(s.font, label, s.w/2-int32(lw)/2, h/2, true, sdl.Color{R: 200, G: 200, B: 200, A: 255})
 	}
 
-	// Total time — right, vertically centered
+	// Total time — right
 	timeStr := formatDuration(scr.TotalSecs)
 	tw, _, _ := s.sm.SizeUTF8(timeStr)
-	s.drawText(s.sm, timeStr, s.w-pad-int32(tw), h/2, true, sdl.Color{R: 184, G: 148, B: 60, A: 255})
+	s.drawText(s.sm, timeStr, s.w-pad-int32(tw), h/2, true, sdl.Color{R: 200, G: 200, B: 200, A: 255})
 }
 
 func (s *state) renderRows(scr Screen, offsetY, rowH int32, visible int) {
@@ -339,8 +338,8 @@ func (s *state) renderRows(scr Screen, offsetY, rowH int32, visible int) {
 		sub := "Play a game — it will appear here after the session ends."
 		mw, _, _ := s.font.SizeUTF8(msg)
 		sw, _, _ := s.sm.SizeUTF8(sub)
-		s.drawText(s.font, msg, s.w/2-int32(mw)/2, midY-int32(s.font.Height()), false, sdl.Color{R: 60, G: 65, B: 95, A: 255})
-		s.drawText(s.sm, sub, s.w/2-int32(sw)/2, midY+4, false, sdl.Color{R: 37, G: 40, B: 64, A: 255})
+		s.drawText(s.font, msg, s.w/2-int32(mw)/2, midY-int32(s.font.Height()), false, sdl.Color{R: 130, G: 130, B: 130, A: 255})
+		s.drawText(s.sm, sub, s.w/2-int32(sw)/2, midY+4, false, sdl.Color{R: 80, G: 80, B: 80, A: 255})
 		return
 	}
 
@@ -366,7 +365,7 @@ func (s *state) renderRow(g db.GameStats, rank int, y, rowH int32) {
 	// Rank number
 	rankStr := fmt.Sprintf("%d", rank)
 	rankW := int32(s.w) / 22 // fixed rank column width
-	s.drawText(s.sm, rankStr, rankW-pad, y+rowH/2, true, sdl.Color{R: 37, G: 40, B: 64, A: 255})
+	s.drawText(s.sm, rankStr, rankW-pad, y+rowH/2, true, sdl.Color{R: 70, G: 70, B: 70, A: 255})
 
 	// Cover
 	coverSize := rowH - rowH/6
@@ -387,9 +386,9 @@ func (s *state) renderRow(g db.GameStats, rank int, y, rowH int32) {
 	nameY := y + rowH/2 - int32(s.font.Height())/2 - 1
 	sysY := nameY + int32(s.font.Height()) + 2
 
-	s.drawText(s.font, g.RomName, infoX, nameY, false, sdl.Color{R: 200, G: 196, B: 186, A: 255})
+	s.drawText(s.font, g.RomName, infoX, nameY, false, sdl.Color{R: 225, G: 225, B: 225, A: 255})
 	s.drawText(s.sm, fmt.Sprintf("%s · avg %s", g.System, formatDuration(g.AvgSecs)),
-		infoX, sysY, false, sdl.Color{R: 46, G: 51, B: 72, A: 255})
+		infoX, sysY, false, sdl.Color{R: 110, G: 110, B: 110, A: 255})
 
 	// Stats — right aligned
 	timeStr := formatDuration(g.TotalSecs)
@@ -402,8 +401,8 @@ func (s *state) renderRow(g db.GameStats, rank int, y, rowH int32) {
 	timeY := y + rowH/2 - int32(s.font.Height())/2 - 1
 	playsY := timeY + int32(s.font.Height()) + 2
 
-	s.drawText(s.font, timeStr, rightEdge-int32(tw), timeY, false, sdl.Color{R: 216, G: 212, B: 202, A: 255})
-	s.drawText(s.sm, playsStr, rightEdge-int32(pw), playsY, false, sdl.Color{R: 37, G: 40, B: 64, A: 255})
+	s.drawText(s.font, timeStr, rightEdge-int32(tw), timeY, false, sdl.Color{R: 225, G: 225, B: 225, A: 255})
+	s.drawText(s.sm, playsStr, rightEdge-int32(pw), playsY, false, sdl.Color{R: 110, G: 110, B: 110, A: 255})
 }
 
 func (s *state) renderFooter(scr Screen, h int32, visible int) {
@@ -413,7 +412,7 @@ func (s *state) renderFooter(scr Screen, h int32, visible int) {
 
 	pad := int32(s.w) / 64
 
-	s.drawText(s.sm, "B / START  exit", pad, y+h/2, true, sdl.Color{R: 32, G: 36, B: 56, A: 255})
+	s.drawText(s.sm, "B  exit    L  R  switch", pad, y+h/2, true, sdl.Color{R: 75, G: 75, B: 75, A: 255})
 
 	var pos string
 	if len(scr.Games) == 0 {
@@ -422,7 +421,7 @@ func (s *state) renderFooter(scr Screen, h int32, visible int) {
 		pos = fmt.Sprintf("%d / %d", s.scroll+1, len(scr.Games))
 	}
 	pw, _, _ := s.sm.SizeUTF8(pos)
-	s.drawText(s.sm, pos, s.w-pad-int32(pw), y+h/2, true, sdl.Color{R: 32, G: 36, B: 56, A: 255})
+	s.drawText(s.sm, pos, s.w-pad-int32(pw), y+h/2, true, sdl.Color{R: 75, G: 75, B: 75, A: 255})
 }
 
 // drawText renders a UTF-8 string. vertCenter=true centers vertically on y.

@@ -19,9 +19,9 @@ type gameList struct {
 }
 
 // CoverPath returns the absolute path to the best available cover art.
-// Returns empty string if nothing is found.
+// Prefers <image> (full art) over <thumbnail> (small box art).
 func (g *Game) CoverPath(romDir string) string {
-	for _, rel := range []string{g.Thumbnail, g.Image} {
+	for _, rel := range []string{g.Image, g.Thumbnail} {
 		if rel == "" {
 			continue
 		}
