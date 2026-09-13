@@ -56,9 +56,24 @@ func runUI() {
 
 func runSession(args []string) {
 	if len(args) < 3 {
-		die("usage: playtime session <start|end> <system> <rom_path>")
+		os.Exit(0)
 	}
-	action, system, romPath := args[0], args[1], args[2]
+	action, system := args[0], args[1]
+
+	// Find the rom path by scanning for the first absolute filesystem path in
+	// the remaining args. This is robust to Knulli/Batocera arg-order variations
+	// (e.g. $3=emulator $4=rom $5=core vs $3=core $4=emulator $5=rom).
+	romPath := ""
+	for _, a := range args[2:] {
+		if len(a) > 1 && a[0] == '/' {
+			romPath = a
+			break
+		}
+	}
+	if romPath == "" {
+		os.Exit(0) // no valid path found — skip silently, must not crash ES
+	}
+
 	base := filepath.Base(romPath)
 	romName := strings.TrimSuffix(base, filepath.Ext(base))
 
@@ -103,15 +118,16 @@ func installHooks(appDir, scriptsDir string) {
 
 	bin := filepath.Join(appDir, appName)
 
-	// Knulli/Batocera ES args: $1=event $2=system $3=emulator $4=core $5=rom_path
+	// Pass all positional args — Go scans for the one that is an absolute path.
+	// This is robust to Knulli arg-order differences across firmware versions.
 	hook := fmt.Sprintf(`#!/bin/sh
 # Managed by PlayTime — do not edit manually.
 case "$1" in
   gameStart)
-    "%s" session start "$2" "$5" &
+    "%s" session start "$2" "$3" "$4" "$5" "$6" &
     ;;
   gameStop)
-    "%s" session end "$2" "$5"
+    "%s" session end "$2" "$3" "$4" "$5" "$6"
     ;;
 esac
 `, bin, bin)

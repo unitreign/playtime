@@ -155,13 +155,25 @@ func (s *state) loadData(store *db.Store, romsRoot string) error {
 		}
 	}
 
-	// Split mpv (video player) out of the games list — it gets its own screen.
-	var games, mpvGames []db.GameStats
-	gamesTotal, mpvTotal := 0, 0
+	// Systems that get their own side screen instead of appearing in All Games.
+	// key=system name, value=screen label.
+	sideScreens := map[string]string{
+		"mpv": "Videos",
+		"sh":  "Tools",
+	}
+
+	type sideEntry struct{ games []db.GameStats; total int }
+	sides := make(map[string]*sideEntry)
+	for k := range sideScreens {
+		sides[k] = &sideEntry{}
+	}
+
+	var games []db.GameStats
+	gamesTotal := 0
 	for _, g := range allGames {
-		if g.System == "mpv" {
-			mpvGames = append(mpvGames, g)
-			mpvTotal += g.TotalSecs
+		if s, ok := sides[g.System]; ok {
+			s.games = append(s.games, g)
+			s.total += g.TotalSecs
 		} else {
 			games = append(games, g)
 			gamesTotal += g.TotalSecs
@@ -176,7 +188,7 @@ func (s *state) loadData(store *db.Store, romsRoot string) error {
 	})
 
 	for _, sys := range systems {
-		if sys == "mpv" {
+		if _, excluded := sideScreens[sys]; excluded {
 			continue
 		}
 		sysGames, _ := store.TopGamesBySystem(sys, minDuration)
@@ -196,13 +208,17 @@ func (s *state) loadData(store *db.Store, romsRoot string) error {
 		})
 	}
 
-	// Videos screen — always last so L/R can reach it.
-	if len(mpvGames) > 0 {
-		s.screens = append(s.screens, Screen{
-			Label:     "Videos",
-			Games:     mpvGames,
-			TotalSecs: mpvTotal,
-		})
+	// Side screens (Videos, Tools, …) — appended last in a stable order.
+	for _, key := range []string{"mpv", "sh"} {
+		label := sideScreens[key]
+		entry := sides[key]
+		if len(entry.games) > 0 {
+			s.screens = append(s.screens, Screen{
+				Label:     label,
+				Games:     entry.games,
+				TotalSecs: entry.total,
+			})
+		}
 	}
 
 	return nil
