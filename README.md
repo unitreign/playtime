@@ -6,6 +6,7 @@ A play time viewer for **Knulli CFW** on Anbernic handhelds.
   <a href="https://github.com/unitreign/playtime/releases/latest"><img src="https://img.shields.io/github/v/release/unitreign/playtime?label=version&color=black" alt="Release"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-black" alt="License: GPL v3"></a>
   <a href="https://ko-fi.com/unitreign"><img src="https://img.shields.io/badge/Ko--fi-support-ff5e5b?logo=ko-fi&logoColor=white" alt="Ko-fi"></a>
+  <a href="https://github.com/unitreign/playtime/releases"><img src="https://img.shields.io/github/downloads/unitreign/playtime/total?color=black" alt="Downloads"></a>
 </p>
 
 Knulli tracks play time in each system's `gamelist.xml` — but there is no UI to see it. PlayTime reads that data and shows your most-played games in a shelf-style view, sorted by time, across all consoles or filtered to one.
@@ -14,6 +15,8 @@ Knulli tracks play time in each system's `gamelist.xml` — but there is no UI t
   <img src="images/preview.png" alt="PlayTime running on an Anbernic handheld" width="600">
   <br>
   <sub>Background removed with AI — device photo taken from my own setup.</sub>
+  <br><br>
+  <a href="https://www.youtube.com/watch?v=YBc3jUqJdCs">▶ Watch demo</a>
 </p>
 
 ## Install
