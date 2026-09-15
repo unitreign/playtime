@@ -21,12 +21,24 @@ Knulli tracks play time in each system's `gamelist.xml` — but there is no UI t
 
 ## Install
 
-1. Download the latest release from the [Releases](https://github.com/unitreign/playtime/releases) page.
-2. Extract and copy the `PlayTime` folder to `/userdata/roms/tools/` on your device.
-3. Refresh Knulli's game list so the tool appears under **Tools**.
-4. Launch **PlayTime** from the Tools menu.
+1. Download the latest release from the **[Releases](https://github.com/unitreign/playtime/releases)** page.
+2. Extract the zip — you'll get a `PlayTime` folder.
+3. Copy it to `/userdata/roms/tools/` on your device.
+4. Refresh Knulli's game list so the tool appears under **Tools**.
+5. Launch **PlayTime** from the Tools menu.
 
 No setup required. If you have played games on Knulli, they will appear immediately.
+
+### Folder structure after install
+
+```
+/userdata/roms/tools/
+└── PlayTime/
+    ├── playtime          ← the binary
+    ├── playtime.sh       ← launch script
+    └── icons/
+        └── playtime.png  ← icon shown in Knulli's menu
+```
 
 ## Features
 
