@@ -3,7 +3,11 @@ name: Build ARM64
 on:
   push:
     branches: [main]
+    tags: ["v*"]
   workflow_dispatch:
+
+permissions:
+  contents: write # needed to create the release on tag pushes
 
 jobs:
   build:
@@ -14,6 +18,9 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.22"
+
+      - name: Test
+        run: CGO_ENABLED=0 go test ./internal/gamelist/
 
       - name: Set up ARM64 cross-compilation environment
         run: |
@@ -112,7 +119,7 @@ jobs:
           PY2
 
       - name: Download dependencies
-        run: go mod tidy
+        run: go mod download
 
       - name: Build
         env:
@@ -129,11 +136,39 @@ jobs:
             -I/tmp/sdl2/sysroot/usr/include
             -I/tmp/sdl2/sysroot/usr/include/aarch64-linux-gnu
           CGO_LDFLAGS: "-L/usr/lib/aarch64-linux-gnu"
-        run: go build -ldflags="-s -w" -o playtime .
+        run: |
+          VERSION=dev-${GITHUB_SHA::7}
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then VERSION=${GITHUB_REF_NAME#v}; fi
+          go build -ldflags="-s -w -X main.version=$VERSION" -o playtime .
 
-      - name: Upload binary
+      - name: Package
+        run: |
+          mkdir -p dist/PlayTime/icons
+          cp playtime playtime.sh dist/PlayTime/
+          cp icons/playtime.png dist/PlayTime/icons/
+          chmod +x dist/PlayTime/playtime dist/PlayTime/playtime.sh
+          cd dist && zip -r PlayTime.zip PlayTime
+
+      - name: Upload build
         uses: actions/upload-artifact@v4
         with:
-          name: playtime-arm64
-          path: playtime
+          name: PlayTime
+          path: dist/PlayTime.zip
           retention-days: 30
+
+      # Tag pushes only: create a DRAFT release so notes can be reviewed before publishing.
+      # Notes come from the annotated tag message (git tag -a vX.Y.Z -F notes.md).
+      - name: Create draft release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="$GITHUB_REF_NAME"
+          git fetch --force origin "refs/tags/$TAG:refs/tags/$TAG"
+          if [ "$(git cat-file -t "$TAG")" = "tag" ]; then
+            git tag -l --format='%(contents)' "$TAG" | sed '/-----BEGIN PGP SIGNATURE-----/,$d' > notes.md
+          else
+            : > notes.md # lightweight tag: write notes on GitHub before publishing
+          fi
+          gh release create "$TAG" dist/PlayTime.zip \
+            --draft --title "$TAG" --notes-file notes.md

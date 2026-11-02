@@ -13,10 +13,10 @@ import (
 //go:embed font.ttf
 var fontData []byte
 
-const (
-	appName = "playtime"
-	version = "1.0.0"
-)
+const appName = "playtime"
+
+// version is set at release build time via -ldflags "-X main.version=…".
+var version = "dev"
 
 func main() {
 	if len(os.Args) < 2 {
