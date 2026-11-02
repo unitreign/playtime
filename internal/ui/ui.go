@@ -356,9 +356,11 @@ func (s *state) loop() error {
 					s.prevScreen()
 				case sdl.CONTROLLER_BUTTON_RIGHTSHOULDER:
 					s.nextScreen()
-				case sdl.CONTROLLER_BUTTON_A:
+				// SDL names face buttons by position; Anbernic's Nintendo-style
+				// labels put "A" where SDL reports B, and vice versa.
+				case sdl.CONTROLLER_BUTTON_B:
 					s.cycleMode()
-				case sdl.CONTROLLER_BUTTON_B, sdl.CONTROLLER_BUTTON_START:
+				case sdl.CONTROLLER_BUTTON_A, sdl.CONTROLLER_BUTTON_START:
 					return nil
 				}
 			}
