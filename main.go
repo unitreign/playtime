@@ -2,11 +2,11 @@ package main
 
 import (
 	_ "embed"
-	"encoding/xml"
 	"fmt"
 	"os"
 	"path/filepath"
 
+	"github.com/unitreign/playtime/internal/gamelist"
 	"github.com/unitreign/playtime/internal/ui"
 )
 
@@ -48,71 +48,30 @@ func installHooks(appDir string) {
 
 // --- gamelist.xml registration ---
 
-type gamelistXML struct {
-	XMLName xml.Name  `xml:"gameList"`
-	Games   []gameXML `xml:"game"`
-}
-
-type gameXML struct {
-	Path      string `xml:"path"`
-	Name      string `xml:"name"`
-	Desc      string `xml:"desc"`
-	Image     string `xml:"image"`
-	Thumbnail string `xml:"thumbnail"`
-}
-
 // updateGamelist adds/updates the PlayTime entry in the tools gamelist.xml.
-// Skips the write if the entry is already correct — avoids triggering a
-// Knulli reload on every launch, which causes a first-launch crash.
 func updateGamelist(appDir string) {
 	toolsDir := filepath.Dir(appDir) // /userdata/roms/tools/
-	glPath := filepath.Join(toolsDir, "gamelist.xml")
-	folderName := filepath.Base(appDir) // "PlayTime"
-
-	entry := gameXML{
+	folderName := filepath.Base(appDir)
+	err := gamelist.Register(filepath.Join(toolsDir, "gamelist.xml"), gamelist.Entry{
 		Path:      "./" + folderName + "/playtime.sh",
 		Name:      "PlayTime",
 		Desc:      "Local gameplay time tracker. See how long you've played every game.",
 		Image:     "./" + folderName + "/icons/playtime.png",
 		Thumbnail: "./" + folderName + "/icons/playtime.png",
-	}
-
-	var gl gamelistXML
-	data, err := os.ReadFile(glPath)
-	if err == nil {
-		xml.Unmarshal(data, &gl)
-	}
-
-	found := false
-	changed := false
-	for i, g := range gl.Games {
-		if g.Path == entry.Path {
-			if g != entry {
-				gl.Games[i] = entry
-				changed = true
-			}
-			found = true
-			break
-		}
-	}
-	if !found {
-		gl.Games = append(gl.Games, entry)
-		changed = true
-	}
-	if !changed {
-		return
-	}
-
-	out, err := xml.MarshalIndent(gl, "", "  ")
+	})
 	if err != nil {
-		return
+		fmt.Fprintf(os.Stderr, "gamelist: %v\n", err)
 	}
-	os.WriteFile(glPath, append([]byte(xml.Header), out...), 0644)
 }
 
 // --- paths ---
 
-func romsDir() string { return "/userdata/roms" }
+func romsDir() string {
+	if d := os.Getenv("PLAYTIME_ROMS"); d != "" {
+		return d
+	}
+	return "/userdata/roms"
+}
 
 func selfDir() string {
 	exe, err := os.Executable()
